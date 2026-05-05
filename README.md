@@ -16,7 +16,7 @@ curl -sSL https://github.com/helloodokai/charter/releases/latest/download/charte
   | tar -xz -C /usr/local/bin charter
 
 # Homebrew
-brew tap helloodokai/tap
+brew tap helloodokai/charter-tap
 brew install charter
 
 # Or build from source:
