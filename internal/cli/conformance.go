@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 
@@ -19,7 +21,8 @@ Produces structured findings that acig can consume.
 
 Examples:
   charter conformance .charters/ch-2026-05-04-abc123.yaml --diff HEAD..feature
-  charter conformance .charters/ch-2026-05-04-abc123.yaml --diff main..HEAD`,
+  charter conformance .charters/ch-2026-05-04-abc123.yaml --diff main..HEAD
+  git diff main..HEAD | charter conformance .charters/ch-2026-05-04-abc123.yaml --diff -`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConformance,
 }
@@ -29,7 +32,7 @@ var confFormat string
 var confOut string
 
 func init() {
-	conformanceCmd.Flags().StringVar(&confDiff, "diff", "", "git ref range (e.g. HEAD..feature)")
+	conformanceCmd.Flags().StringVar(&confDiff, "diff", "", "git ref range (e.g. HEAD..feature) or '-' for stdin")
 	conformanceCmd.Flags().StringVar(&confFormat, "format", "md", "output format: json, md, both")
 	conformanceCmd.Flags().StringVar(&confOut, "out", "", "output path (defaults to stdout)")
 	rootCmd.AddCommand(conformanceCmd)
@@ -43,13 +46,32 @@ func runConformance(cmd *cobra.Command, args []string) error {
 	}
 
 	var diffContent string
-	if confDiff != "" {
+
+	switch {
+	case confDiff == "-":
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("reading diff from stdin: %w", err)
+		}
+		diffContent = string(data)
+
+	case confDiff != "":
 		diffContent, err = getDiff(confDiff)
 		if err != nil {
 			return fmt.Errorf("getting diff: %w", err)
 		}
-	} else {
-		return fmt.Errorf("--diff is required")
+
+	default:
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("reading diff from stdin: %w", err)
+			}
+			diffContent = string(data)
+		} else {
+			return fmt.Errorf("--diff is required (e.g. --diff HEAD..feature, or pipe diff via stdin)")
+		}
 	}
 
 	verdict := conformance.Grade(c, diffContent)
@@ -68,7 +90,12 @@ func runConformance(cmd *cobra.Command, args []string) error {
 }
 
 func getDiff(refRange string) (string, error) {
-	return "", fmt.Errorf("diff extraction not yet implemented — provide diff content via stdin or a file")
+	cmd := exec.Command("git", "diff", refRange)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("running git diff %s: %w", refRange, err)
+	}
+	return string(out), nil
 }
 
 func outputJSON(v *conformance.Verdict, path string) error {
