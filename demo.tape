@@ -11,14 +11,25 @@ Sleep 500ms
 
 Type ""
 Enter
+Sleep 1s
+
+Type "echo 'Step 0: Initialize Charter in a repo'"
+Enter
+Sleep 500ms
+Type "charter init"
+Enter
+Sleep 3s
+
+Type ""
+Enter
 Sleep 2s
 
 Type "echo 'Step 1: Draft a charter — just describe what you want'"
 Enter
-Sleep 1s
+Sleep 500ms
 Type "charter draft 'Add rate limiting to the public API' --non-interactive --turn-budget 3 --no-transcript"
 Enter
-Sleep 8s
+Sleep 15s
 
 Type ""
 Enter
@@ -31,10 +42,6 @@ Sleep 2s
 Type ""
 Enter
 Sleep 2s
-
-Type "echo 'The draft needs details — validate shows what to fill in:'"
-Enter
-Sleep 500ms
 
 Type "echo 'Step 2: Validate the completed charter'"
 Enter
@@ -61,7 +68,7 @@ Type ""
 Enter
 Sleep 2s
 
-Type "echo 'Step 4: Conformance - diff stays within blast radius'"
+Type "echo 'Step 4: Conformance — diff stays within blast radius'"
 Enter
 Sleep 500ms
 Type "git diff main..feat/rate-limit | charter conformance .charters/ch-2026-05-05-rate010.yaml --diff - --format md"
@@ -72,7 +79,7 @@ Type ""
 Enter
 Sleep 2s
 
-Type "echo 'Step 5: Conformance - diff VIOLATES blast radius'"
+Type "echo 'Step 5: Conformance — diff VIOLATES blast radius'"
 Enter
 Sleep 500ms
 Type "echo '  Touching src/auth/ which is NOT in blast radius!'"
