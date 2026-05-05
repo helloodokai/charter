@@ -30,13 +30,19 @@ cd charter && make build && cp dist/charter /usr/local/bin/
 
 ## Quick start
 
-Draft your first charter from a GitHub issue in under a minute:
+Draft your first charter — just describe what you want to build:
 
 ```bash
 # Set your Ollama Cloud API key
 export OLLAMA_API_KEY=your-key-here
 
-# Draft a charter from any GitHub issue
+# Just run it — you'll be prompted for your goal
+charter draft
+
+# Or pass your goal directly
+charter draft "Add rate limiting to the public API"
+
+# Or start from a GitHub issue
 charter draft --issue https://github.com/your-org/your-repo/issues/42
 
 # Or from a file
@@ -108,7 +114,7 @@ charter doctor
 ## CLI reference
 
 ```
-charter draft [--issue URL] [--from FILE] [--stdin] [--out PATH] [--non-interactive] [--turn-budget N] [--profile cloud|local] [--resume ID]
+charter draft [goal] [--issue URL] [--from FILE] [--stdin] [--out PATH] [--non-interactive] [--turn-budget N] [--profile cloud|local] [--resume ID]
 charter validate <charter.yaml>
 charter conformance <charter.yaml> --diff REF..REF [--format json|md|both] [--out PATH]
 charter ls [--status draft|ready|approved|archived]
@@ -122,8 +128,11 @@ charter app serve [--addr :8080]
 
 The workhorse. Starts an interactive Socratic dialogue to produce a charter.
 
+If no source is provided, you'll be prompted to describe your goal.
+
 | Flag | Description |
 |------|-------------|
+| `[goal]` | Describe what you want to build (positional arg) |
 | `--issue URL` | Source from a GitHub issue |
 | `--from FILE` | Source from a local file |
 | `--stdin` | Source from stdin |

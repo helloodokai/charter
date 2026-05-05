@@ -13,21 +13,10 @@ Type ""
 Enter
 Sleep 2s
 
-Type "echo 'Step 1: Draft a charter from a requirements file'"
+Type "echo 'Step 1: Draft a charter — just describe what you want'"
 Enter
 Sleep 1s
-Type "cat requirements.txt"
-Enter
-Sleep 4s
-
-Type ""
-Enter
-Sleep 2s
-
-Type "echo 'Creating charter via Socratic dialogue...'"
-Enter
-Sleep 500ms
-Type "charter draft --from requirements.txt --non-interactive --turn-budget 3 --no-transcript"
+Type "charter draft 'Add rate limiting to the public API' --non-interactive --turn-budget 3 --no-transcript"
 Enter
 Sleep 8s
 
@@ -43,16 +32,9 @@ Type ""
 Enter
 Sleep 2s
 
-Type "echo 'The draft is sparse — validate shows what to fill in:'"
+Type "echo 'The draft needs details — validate shows what to fill in:'"
 Enter
 Sleep 500ms
-Type "ls .charters/*.yaml | head -2"
-Enter
-Sleep 2s
-
-Type ""
-Enter
-Sleep 2s
 
 Type "echo 'Step 2: Validate the completed charter'"
 Enter
@@ -79,7 +61,7 @@ Type ""
 Enter
 Sleep 2s
 
-Type "echo 'Step 4: Conformance — diff stays within blast radius'"
+Type "echo 'Step 4: Conformance - diff stays within blast radius'"
 Enter
 Sleep 500ms
 Type "git diff main..feat/rate-limit | charter conformance .charters/ch-2026-05-05-rate010.yaml --diff - --format md"
@@ -90,10 +72,10 @@ Type ""
 Enter
 Sleep 2s
 
-Type "echo 'Step 5: Conformance — diff VIOLATES blast radius'"
+Type "echo 'Step 5: Conformance - diff VIOLATES blast radius'"
 Enter
 Sleep 500ms
-Type "echo '  Touching src/auth/ — which is NOT in blast radius!'"
+Type "echo '  Touching src/auth/ which is NOT in blast radius!'"
 Enter
 Sleep 2s
 Type "cat bad-diff.patch | charter conformance .charters/ch-2026-05-05-rate010.yaml --diff - --format md"

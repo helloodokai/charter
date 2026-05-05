@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -20,12 +21,16 @@ import (
 )
 
 var draftCmd = &cobra.Command{
-	Use:   "draft",
+	Use:   "draft [goal]",
 	Short: "Draft a charter via interactive Socratic dialogue",
-	Long: `Draft a charter from a GitHub issue, file, or stdin. CHARTER runs an
+	Long: `Draft a charter from a goal, GitHub issue, file, or stdin. CHARTER runs an
 interactive Socratic dialogue to harden your intent into a machine-readable spec.
 
+If no source is specified, you'll be prompted to describe what you want to build.
+
 Examples:
+  charter draft
+  charter draft "Add rate limiting to the public API"
   charter draft --issue https://github.com/org/repo/issues/42
   charter draft --from requirements.txt
   echo "Add login page" | charter draft --stdin
@@ -78,7 +83,7 @@ func runDraft(cmd *cobra.Command, args []string) error {
 		}
 		source = c.Source
 	} else {
-		source, err = resolveSource(cmd)
+		source, err = resolveSource(cmd, args)
 		if err != nil {
 			return err
 		}
@@ -133,7 +138,7 @@ func runDraft(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func resolveSource(cmd *cobra.Command) (charter.Source, error) {
+func resolveSource(cmd *cobra.Command, args []string) (charter.Source, error) {
 	count := 0
 	if draftIssue != "" {
 		count++
@@ -175,7 +180,28 @@ func resolveSource(cmd *cobra.Command) (charter.Source, error) {
 			src := sources.NewStdinSource()
 			return src.Fetch()
 		}
-		return charter.Source{}, fmt.Errorf("specify a source: --issue URL, --from FILE, or --stdin")
+		goal := ""
+		if len(args) > 0 {
+			goal = strings.Join(args, " ")
+		}
+		if goal == "" {
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "  What do you want to build? Describe your goal:")
+			fmt.Fprint(os.Stderr, "  > ")
+			reader := bufio.NewReader(os.Stdin)
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return charter.Source{}, fmt.Errorf("reading goal: %w", err)
+			}
+			goal = strings.TrimSpace(line)
+		}
+		if goal == "" {
+			return charter.Source{}, fmt.Errorf("a goal is required — describe what you want to build")
+		}
+		return charter.Source{
+			Type: "interactive",
+			Raw:  goal,
+		}, nil
 	}
 }
 
