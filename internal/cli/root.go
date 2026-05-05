@@ -11,12 +11,17 @@ import (
 
 var cfg *config.Config
 
+var Version = "dev"
+var Commit = "none"
+var Date = "unknown"
+
 var rootCmd = &cobra.Command{
 	Use:   "charter",
 	Short: "Turn fuzzy intent into hardened, machine-readable specifications",
 	Long: `CHARTER turns fuzzy human intent — a half-written GitHub issue, a Slack
 thread, a "hey can you…" message — into a hardened, versioned, machine-readable
 specification that downstream coding agents consume as a contract.`,
+	Version: Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		repoRoot, _ := cmd.Flags().GetString("repo-root")
 		if repoRoot == "" {

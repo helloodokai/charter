@@ -6,19 +6,23 @@ CHARTER is an upstream companion to [`acig`](https://github.com/helloodokai/acig
 
 ## Install
 
-**Homebrew:**
-
 ```bash
-brew install helloodokai/tap/charter
+# macOS / Linux (arm64)
+curl -sSL https://github.com/helloodokai/charter/releases/latest/download/charter_darwin_arm64.tar.gz \
+  | tar -xz -C /usr/local/bin charter
+
+# Linux (amd64)
+curl -sSL https://github.com/helloodokai/charter/releases/latest/download/charter_linux_amd64.tar.gz \
+  | tar -xz -C /usr/local/bin charter
+
+# Homebrew
+brew tap helloodokai/tap
+brew install charter
+
+# Or build from source:
+git clone https://github.com/helloodokai/charter.git
+cd charter && make build && cp dist/charter /usr/local/bin/
 ```
-
-**Go install:**
-
-```bash
-go install github.com/helloodokai/charter/cmd/charter@latest
-```
-
-**Download a binary** from [GitHub Releases](https://github.com/helloodokai/charter/releases).
 
 ## Quick start
 

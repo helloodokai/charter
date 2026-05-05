@@ -1,34 +1,29 @@
-.PHONY: build test lint vet schema install clean
+.PHONY: build test lint vet clean release-snapshot schema
 
-BINARY=charter
-GO=go
-LDFLAGS=-ldflags "-s -w"
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
 build:
-	$(GO) build $(LDFLAGS) -o bin/$(BINARY) ./cmd/charter
+	go build $(LDFLAGS) -o dist/charter ./cmd/charter
 
 build-app:
-	$(GO) build $(LDFLAGS) -o bin/charter-app ./cmd/charter-app
+	go build $(LDFLAGS) -o dist/charter-app ./cmd/charter-app
 
 test:
-	$(GO) test ./...
+	go test ./...
 
 lint:
-	golangci-lint run ./...
+	golangci-lint run
 
 vet:
-	$(GO) vet ./...
-
-schema: bin
-	$(GO) run ./cmd/charter schema --out schema/charter.schema.json
-
-install: build
-	cp bin/$(BINARY) $(GOPATH)/bin/$(BINARY) 2>/dev/null || sudo cp bin/$(BINARY) /usr/local/bin/$(BINARY)
-
-bin:
-	mkdir -p bin
+	go vet ./...
 
 clean:
-	rm -rf bin/
+	rm -rf dist/
 
-all: build build-app
+release-snapshot:
+	goreleaser release --snapshot --clean
+
+schema:
+	@mkdir -p schema
+	@go run ./cmd/charter schema > schema/charter.schema.json

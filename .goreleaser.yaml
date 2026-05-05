@@ -1,20 +1,18 @@
 version: 2
 
-project_name: charter
-
 before:
   hooks:
     - go mod tidy
 
 builds:
   - id: charter
-    main: ./cmd/charter
+    main: ./cmd/charter/main.go
     binary: charter
     env:
       - CGO_ENABLED=0
     goos:
-      - darwin
       - linux
+      - darwin
       - windows
     goarch:
       - amd64
@@ -23,13 +21,13 @@ builds:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
 
   - id: charter-app
-    main: ./cmd/charter-app
+    main: ./cmd/charter-app/main.go
     binary: charter-app
     env:
       - CGO_ENABLED=0
     goos:
-      - darwin
       - linux
+      - darwin
       - windows
     goarch:
       - amd64
@@ -39,46 +37,30 @@ builds:
 
 archives:
   - id: charter
-    builds:
-      - charter
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- if eq .Os "darwin" }}macOS
-      {{- else }}{{ .Os }}{{ end }}_
-      {{- .Arch }}
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
 
-  - id: charter-app
-    builds:
-      - charter-app
-    name_template: >-
-      {{ .ProjectName }}-app_
-      {{- if eq .Os "darwin" }}macOS
-      {{- else }}{{ .Os }}{{ end }}_
-      {{- .Arch }}
-
-brews:
-  - name: charter
-    ids:
-      - charter
-    tap:
+homebrew_casks:
+  - repository:
       owner: helloodokai
       name: homebrew-tap
-    folder: Formula
-    homepage: https://github.com/helloodokai/charter
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/helloodokai/charter"
     description: "Turn fuzzy intent into hardened, machine-readable specifications"
-    install: |
-      bin.install "charter"
-    test: |
-      system "#{bin}/charter", "--help"
+    binaries: [charter]
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/charter"]
+          end
 
 checksum:
   name_template: "checksums.txt"
-
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
