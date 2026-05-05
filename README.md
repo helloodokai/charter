@@ -1,5 +1,7 @@
 # charter
 
+<p align="center"><img src="charter-logo.png" alt="charter logo" width="200"></p>
+
 > Turn fuzzy intent into hardened, machine-readable specifications.
 
 CHARTER is an upstream companion to [`acig`](https://github.com/helloodokai/acig) that turns half-written GitHub issues, Slack threads, and "hey can you…" messages into versioned, machine-readable contracts that coding agents consume as specifications. Where `acig` verifies output **after** an agent finishes work, CHARTER hardens intent **before** the agent starts.
