@@ -128,6 +128,8 @@ func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cfg.expandEnv()
+			cfg.resolveAPIKeys()
 			return cfg, nil
 		}
 		return nil, fmt.Errorf("reading config: %w", err)
@@ -136,6 +138,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 	cfg.expandEnv()
+	cfg.resolveAPIKeys()
 	return cfg, nil
 }
 
@@ -149,7 +152,10 @@ func FindAndLoad(repoRoot string) (*Config, error) {
 			return Load(p)
 		}
 	}
-	return Default(), nil
+	cfg := Default()
+	cfg.expandEnv()
+	cfg.resolveAPIKeys()
+	return cfg, nil
 }
 
 func (c *Config) expandEnv() {
@@ -158,6 +164,18 @@ func (c *Config) expandEnv() {
 	c.Models.OpenAI.APIKey = os.ExpandEnv(c.Models.OpenAI.APIKey)
 	c.Models.OllamaCloud.Host = os.ExpandEnv(c.Models.OllamaCloud.Host)
 	c.Models.OllamaLocal.Host = os.ExpandEnv(c.Models.OllamaLocal.Host)
+}
+
+func (c *Config) resolveAPIKeys() {
+	if c.Models.OllamaCloud.APIKey == "" {
+		c.Models.OllamaCloud.APIKey = os.Getenv("OLLAMA_API_KEY")
+	}
+	if c.Models.Anthropic.APIKey == "" {
+		c.Models.Anthropic.APIKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	if c.Models.OpenAI.APIKey == "" {
+		c.Models.OpenAI.APIKey = os.Getenv("OPENAI_API_KEY")
+	}
 }
 
 func (c *Config) GetProfile(name string) (ProfileConfig, error) {
