@@ -9,6 +9,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// Config holds the top-level charter configuration.
 type Config struct {
 	Dialogue DialogueConfig `toml:"dialogue"`
 	Storage  StorageConfig  `toml:"storage"`
@@ -17,16 +18,19 @@ type Config struct {
 	Paths    PathsConfig    `toml:"paths"`
 }
 
+// DialogueConfig configures the dialogue turn behaviour.
 type DialogueConfig struct {
 	TurnBudget      int    `toml:"turn_budget"`
 	AskForRollback  string `toml:"ask_for_rollback_at"`
 	RequireCounterSpec bool  `toml:"require_counter_spec"`
 }
 
+// StorageConfig configures charter storage paths.
 type StorageConfig struct {
 	ChartersDir string `toml:"charters_dir"`
 }
 
+// ModelsConfig configures LLM provider connections and profiles.
 type ModelsConfig struct {
 	DefaultProfile   string                    `toml:"default_profile"`
 	FallbackToLocal  bool                      `toml:"fallback_to_local"`
@@ -37,30 +41,36 @@ type ModelsConfig struct {
 	OpenAI           OpenAIConfig               `toml:"openai"`
 }
 
+// ProfileConfig maps each tier to a model reference for a routing profile.
 type ProfileConfig struct {
 	Cheap    ModelRef `toml:"cheap"`
 	Mid      ModelRef `toml:"mid"`
 	Frontier ModelRef `toml:"frontier"`
 }
 
+// ModelRef references a specific model by provider and name.
 type ModelRef struct {
 	Provider string `toml:"provider"`
 	Name     string `toml:"name"`
 }
 
+// OllamaConfig configures an Ollama host connection.
 type OllamaConfig struct {
 	Host   string `toml:"host"`
 	APIKey string `toml:"api_key"`
 }
 
+// AnthropicConfig configures the Anthropic API connection.
 type AnthropicConfig struct {
 	APIKey string `toml:"api_key"`
 }
 
+// OpenAIConfig configures the OpenAI API connection.
 type OpenAIConfig struct {
 	APIKey string `toml:"api_key"`
 }
 
+// GitHubConfig configures GitHub App authentication and label settings.
 type GitHubConfig struct {
 	AppIDEnv      string `toml:"app_id_env"`
 	PrivateKeyEnv string `toml:"private_key_env"`
@@ -68,10 +78,12 @@ type GitHubConfig struct {
 	HasLabel      string `toml:"has_label"`
 }
 
+// PathsConfig lists critical path globs that influence risk assessment.
 type PathsConfig struct {
 	Critical []string `toml:"critical"`
 }
 
+// Default returns a Config populated with sensible defaults.
 func Default() *Config {
 	return &Config{
 		Dialogue: DialogueConfig{
@@ -97,19 +109,19 @@ func Default() *Config {
 					Frontier: ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-6"},
 				},
 			},
-			OllamaCloud: OllamaConfig{
-				Host:   "https://ollama.com",
-				APIKey: "${OLLAMA_API_KEY}",
-			},
-			OllamaLocal: OllamaConfig{
-				Host: "http://localhost:11434",
-			},
-			Anthropic: AnthropicConfig{
-				APIKey: "${ANTHROPIC_API_KEY}",
-			},
-			OpenAI: OpenAIConfig{
-				APIKey: "${OPENAI_API_KEY}",
-			},
+		OllamaCloud: OllamaConfig{ //nolint:gosec // false positive: env var template, not hardcoded credential
+			Host:   "https://ollama.com",
+			APIKey: "${OLLAMA_API_KEY}",
+		},
+		OllamaLocal: OllamaConfig{
+			Host: "http://localhost:11434",
+		},
+		Anthropic: AnthropicConfig{ //nolint:gosec // false positive: env var template, not hardcoded credential
+			APIKey: "${ANTHROPIC_API_KEY}",
+		},
+		OpenAI: OpenAIConfig{ //nolint:gosec // false positive: env var template, not hardcoded credential
+			APIKey: "${OPENAI_API_KEY}",
+		},
 		},
 		GitHub: GitHubConfig{
 			AppIDEnv:      "GITHUB_APP_ID",
@@ -123,9 +135,10 @@ func Default() *Config {
 	}
 }
 
+// Load reads and parses a TOML config file, falling back to defaults when the file is missing.
 func Load(path string) (*Config, error) {
 	cfg := Default()
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // expected: user-specified config path
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg.expandEnv()
@@ -142,6 +155,7 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// FindAndLoad searches standard paths for a config file and loads it, or returns defaults.
 func FindAndLoad(repoRoot string) (*Config, error) {
 	paths := []string{
 		filepath.Join(repoRoot, ".charter.toml"),
@@ -178,6 +192,7 @@ func (c *Config) resolveAPIKeys() {
 	}
 }
 
+// GetProfile returns the ProfileConfig for the named profile, or an error if not found.
 func (c *Config) GetProfile(name string) (ProfileConfig, error) {
 	p, ok := c.Models.Profiles[name]
 	if !ok {
@@ -186,49 +201,52 @@ func (c *Config) GetProfile(name string) (ProfileConfig, error) {
 	return p, nil
 }
 
+// ChartersDir returns the full path to the charters directory under the given repo root.
 func (c *Config) ChartersDir(repoRoot string) string {
 	return filepath.Join(repoRoot, c.Storage.ChartersDir)
 }
 
+// MarshalTOML serialises the Config to TOML bytes.
 func MarshalTOML(c *Config) ([]byte, error) {
 	var buf strings.Builder
+	bufPtr := &buf
 
 	buf.WriteString("# Charter configuration\n")
 	buf.WriteString("# See https://github.com/helloodokai/charter for full docs\n")
 	buf.WriteString("\n")
 
 	buf.WriteString("[dialogue]\n")
-	buf.WriteString(fmt.Sprintf("turn_budget         = %d\n", c.Dialogue.TurnBudget))
-	buf.WriteString(fmt.Sprintf("ask_for_rollback_at = %q\n", c.Dialogue.AskForRollback))
-	buf.WriteString(fmt.Sprintf("require_counter_spec = %v\n", c.Dialogue.RequireCounterSpec))
+	fmt.Fprintf(bufPtr, "turn_budget         = %d\n", c.Dialogue.TurnBudget)
+	fmt.Fprintf(bufPtr, "ask_for_rollback_at = %q\n", c.Dialogue.AskForRollback)
+	fmt.Fprintf(bufPtr, "require_counter_spec = %v\n", c.Dialogue.RequireCounterSpec)
 	buf.WriteString("\n")
 
 	buf.WriteString("[storage]\n")
-	buf.WriteString(fmt.Sprintf("charters_dir = %q\n", c.Storage.ChartersDir))
+	fmt.Fprintf(bufPtr, "charters_dir = %q\n", c.Storage.ChartersDir)
 	buf.WriteString("\n")
 
 	buf.WriteString("[models]\n")
-	buf.WriteString(fmt.Sprintf("default_profile    = %q\n", c.Models.DefaultProfile))
-	buf.WriteString(fmt.Sprintf("fallback_to_local  = %v\n", c.Models.FallbackToLocal))
+	fmt.Fprintf(bufPtr, "default_profile    = %q\n", c.Models.DefaultProfile)
+	fmt.Fprintf(bufPtr, "fallback_to_local  = %v\n", c.Models.FallbackToLocal)
 	buf.WriteString("\n")
 
 	writeProfile := func(name string, p ProfileConfig) {
-		buf.WriteString(fmt.Sprintf("[models.profiles.%s]\n", name))
-		buf.WriteString(fmt.Sprintf("cheap    = { provider = %q, name = %q }\n", p.Cheap.Provider, p.Cheap.Name))
-		buf.WriteString(fmt.Sprintf("mid      = { provider = %q, name = %q }\n", p.Mid.Provider, p.Mid.Name))
-		buf.WriteString(fmt.Sprintf("frontier = { provider = %q, name = %q }\n", p.Frontier.Provider, p.Frontier.Name))
+		fmt.Fprintf(bufPtr, "[models.profiles.%s]\n", name)
+		fmt.Fprintf(bufPtr, "cheap    = { provider = %q, name = %q }\n", p.Cheap.Provider, p.Cheap.Name)
+		fmt.Fprintf(bufPtr, "mid      = { provider = %q, name = %q }\n", p.Mid.Provider, p.Mid.Name)
+		fmt.Fprintf(bufPtr, "frontier = { provider = %q, name = %q }\n", p.Frontier.Provider, p.Frontier.Name)
 		buf.WriteString("\n")
 	}
 	writeProfile("cloud", c.Models.Profiles["cloud"])
 	writeProfile("local", c.Models.Profiles["local"])
 
 	buf.WriteString("[models.ollama_cloud]\n")
-	buf.WriteString(fmt.Sprintf("host     = %q\n", c.Models.OllamaCloud.Host))
+	fmt.Fprintf(bufPtr, "host     = %q\n", c.Models.OllamaCloud.Host)
 	buf.WriteString("api_key  = \"${OLLAMA_API_KEY}\"\n")
 	buf.WriteString("\n")
 
 	buf.WriteString("[models.ollama_local]\n")
-	buf.WriteString(fmt.Sprintf("host     = %q\n", c.Models.OllamaLocal.Host))
+	fmt.Fprintf(bufPtr, "host     = %q\n", c.Models.OllamaLocal.Host)
 	buf.WriteString("\n")
 
 	buf.WriteString("[models.anthropic]\n")
@@ -240,10 +258,10 @@ func MarshalTOML(c *Config) ([]byte, error) {
 	buf.WriteString("\n")
 
 	buf.WriteString("[github]\n")
-	buf.WriteString(fmt.Sprintf("app_id_env       = %q\n", c.GitHub.AppIDEnv))
-	buf.WriteString(fmt.Sprintf("private_key_env  = %q\n", c.GitHub.PrivateKeyEnv))
-	buf.WriteString(fmt.Sprintf("needs_label      = %q\n", c.GitHub.NeedsLabel))
-	buf.WriteString(fmt.Sprintf("has_label        = %q\n", c.GitHub.HasLabel))
+	fmt.Fprintf(bufPtr, "app_id_env       = %q\n", c.GitHub.AppIDEnv)
+	fmt.Fprintf(bufPtr, "private_key_env  = %q\n", c.GitHub.PrivateKeyEnv)
+	fmt.Fprintf(bufPtr, "needs_label      = %q\n", c.GitHub.NeedsLabel)
+	fmt.Fprintf(bufPtr, "has_label        = %q\n", c.GitHub.HasLabel)
 	buf.WriteString("\n")
 
 	buf.WriteString("[paths]\n")
@@ -252,7 +270,7 @@ func MarshalTOML(c *Config) ([]byte, error) {
 		if i > 0 {
 			buf.WriteString(", ")
 		}
-		buf.WriteString(fmt.Sprintf("%q", p))
+		fmt.Fprintf(bufPtr, "%q", p)
 	}
 	buf.WriteString("]\n")
 

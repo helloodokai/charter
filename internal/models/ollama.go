@@ -14,6 +14,7 @@ import (
 	"github.com/helloodokai/charter/internal/config"
 )
 
+// OllamaClient implements Client for the Ollama API.
 type OllamaClient struct {
 	host   string
 	apiKey string
@@ -21,6 +22,7 @@ type OllamaClient struct {
 	local  bool
 }
 
+// NewOllamaCloudClient creates a new Ollama client targeting the cloud-hosted instance.
 func NewOllamaCloudClient(cfg config.OllamaConfig) *OllamaClient {
 	return &OllamaClient{
 		host:   cfg.Host,
@@ -30,6 +32,7 @@ func NewOllamaCloudClient(cfg config.OllamaConfig) *OllamaClient {
 	}
 }
 
+// NewOllamaLocalClient creates a new Ollama client targeting a local instance.
 func NewOllamaLocalClient(cfg config.OllamaConfig) *OllamaClient {
 	return &OllamaClient{
 		host:   cfg.Host,
@@ -78,10 +81,7 @@ func (c *OllamaClient) doRequest(ctx context.Context, req CompletionRequest, str
 		},
 	}
 	for _, m := range req.Messages {
-		ollamaReq.Messages = append(ollamaReq.Messages, ollamaMsg{
-			Role:    m.Role,
-			Content: m.Content,
-		})
+		ollamaReq.Messages = append(ollamaReq.Messages, ollamaMsg(m))
 	}
 
 	body, err := json.Marshal(ollamaReq)
@@ -102,6 +102,7 @@ func (c *OllamaClient) doRequest(ctx context.Context, req CompletionRequest, str
 	return c.client.Do(httpReq)
 }
 
+// Complete sends a non-streaming completion request to Ollama.
 func (c *OllamaClient) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
 	resp, err := c.doRequest(ctx, req, false)
 	if err != nil {
@@ -129,6 +130,7 @@ func (c *OllamaClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 	}, nil
 }
 
+// Stream sends a streaming completion request to Ollama, writing tokens to w.
 func (c *OllamaClient) Stream(ctx context.Context, req CompletionRequest, w io.Writer) (*CompletionResponse, error) {
 	resp, err := c.doRequest(ctx, req, true)
 	if err != nil {
@@ -189,6 +191,7 @@ func (c *OllamaClient) Stream(ctx context.Context, req CompletionRequest, w io.W
 	}, nil
 }
 
+// Name returns the provider name for the Ollama client.
 func (c *OllamaClient) Name() string {
 	if c.local {
 		return "ollama-local"

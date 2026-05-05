@@ -37,7 +37,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid GITHUB_APP_ID: %w", err)
 	}
 
-	privateKey, err := os.ReadFile(os.Getenv(cfg.GitHub.PrivateKeyEnv))
+	privateKey, err := os.ReadFile(os.Getenv(cfg.GitHub.PrivateKeyEnv)) //nolint:gosec // expected: user-controlled config path
 	if err != nil {
 		return fmt.Errorf("reading private key: %w", err)
 	}

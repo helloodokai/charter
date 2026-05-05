@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/google/go-github/v66/github"
 )
 
+// Server is the GitHub App webhook server.
 type Server struct {
 	port       int
 	appID      int64
@@ -19,12 +21,14 @@ type Server struct {
 	handler    *http.ServeMux
 }
 
+// Config holds the GitHub App server configuration.
 type Config struct {
 	Port       int
 	AppID      int64
 	PrivateKey []byte
 }
 
+// NewServer creates a new Server with the given configuration.
 func NewServer(cfg Config) (*Server, error) {
 	s := &Server{
 		port:       cfg.Port,
@@ -39,11 +43,13 @@ func NewServer(cfg Config) (*Server, error) {
 	return s, nil
 }
 
+// Run starts the HTTP server and blocks until a shutdown signal is received.
 func (s *Server) Run(ctx context.Context) error {
 	addr := fmt.Sprintf(":%d", s.port)
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: s.handler,
+		Addr:              addr,
+		Handler:           s.handler,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	done := make(chan os.Signal, 1)

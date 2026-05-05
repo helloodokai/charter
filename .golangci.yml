@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
 
@@ -9,20 +11,32 @@ linters:
     - revive
     - gosec
 
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  revive:
-    rules:
-      - name: exported
-        severity: warning
-  gosec:
-    excludes:
-      - G104
-      - G204
-      - G306
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+    gosec:
+      excludes:
+        - G104
+        - G204
+        - G306
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+        - fmt.Sprint
+        - fmt.Sprintf
+        - (io.Writer).Write
+        - (io.Closer).Close
+
+  exclusions:
+    generated: lax
 
 issues:
   max-issues-per-linter: 50

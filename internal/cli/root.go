@@ -11,8 +11,13 @@ import (
 
 var cfg *config.Config
 
+// Version is set at build time via ldflags.
 var Version = "dev"
+
+// Commit is set at build time via ldflags.
 var Commit = "none"
+
+// Date is set at build time via ldflags.
 var Date = "unknown"
 
 var rootCmd = &cobra.Command{
@@ -44,6 +49,7 @@ func init() {
 	rootCmd.PersistentFlags().String("profile", "", "model profile: cloud, local (defaults to config)")
 }
 
+// Execute runs the root CLI command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -51,10 +57,12 @@ func Execute() {
 	}
 }
 
+// GetConfig returns the loaded configuration.
 func GetConfig() *config.Config {
 	return cfg
 }
 
+// GetProfileName returns the model profile name from the CLI flag or the config default.
 func GetProfileName(cmd *cobra.Command) string {
 	profile, _ := cmd.Flags().GetString("profile")
 	if profile != "" {

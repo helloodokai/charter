@@ -1,5 +1,6 @@
 package conformance
 
+// AcigFinding represents a finding in the ACIG interchange format.
 type AcigFinding struct {
 	Critic     string `json:"critic"`
 	Severity   string `json:"severity"`
@@ -10,6 +11,7 @@ type AcigFinding struct {
 	Line       int    `json:"line,omitempty"`
 }
 
+// ToAcig converts a Finding to the ACIG interchange format.
 func (f Finding) ToAcig() AcigFinding {
 	return AcigFinding{
 		Critic:     f.Critic,
@@ -22,6 +24,7 @@ func (f Finding) ToAcig() AcigFinding {
 	}
 }
 
+// ToAcigVerdict converts a Verdict to the ACIG interchange format.
 func (v Verdict) ToAcigVerdict() map[string]interface{} {
 	findings := make([]AcigFinding, len(v.Findings))
 	for i, f := range v.Findings {

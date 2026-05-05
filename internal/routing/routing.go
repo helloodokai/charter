@@ -10,12 +10,14 @@ import (
 	"github.com/helloodokai/charter/internal/models"
 )
 
+// Router selects the appropriate LLM client based on tier and profile configuration.
 type Router struct {
 	clients  map[models.Provider]models.Client
 	profile  config.ProfileConfig
 	fallback *config.ProfileConfig
 }
 
+// NewRouter creates a new Router with clients initialized from the given config and profile.
 func NewRouter(cfg *config.Config, profileName string) (*Router, error) {
 	profile, err := cfg.GetProfile(profileName)
 	if err != nil {
@@ -46,6 +48,7 @@ func NewRouter(cfg *config.Config, profileName string) (*Router, error) {
 	}, nil
 }
 
+// Complete routes a non-streaming completion request to the appropriate provider for the given tier.
 func (r *Router) Complete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (*models.CompletionResponse, error) {
 	ref := r.tierRef(tier)
 	resp, err := r.completeWithRef(ctx, ref, req)
@@ -57,6 +60,7 @@ func (r *Router) Complete(ctx context.Context, tier models.Tier, req models.Comp
 	return resp, err
 }
 
+// Stream routes a streaming completion request to the appropriate provider for the given tier.
 func (r *Router) Stream(ctx context.Context, tier models.Tier, req models.CompletionRequest, w io.Writer) (*models.CompletionResponse, error) {
 	ref := r.tierRef(tier)
 	resp, err := r.streamWithRef(ctx, ref, req, w)
@@ -117,6 +121,7 @@ func (r *Router) fallbackTierRef(tier models.Tier) config.ModelRef {
 	}
 }
 
+// CheckReachable pings all configured providers and returns a map of provider names to errors for any that are unreachable.
 func (r *Router) CheckReachable(ctx context.Context) map[string]error {
 	results := make(map[string]error)
 	for prov, client := range r.clients {

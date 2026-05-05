@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,18 +241,3 @@ func newGitHubClient() *github.Client {
 	return github.NewClient(nil)
 }
 
-func readFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func readStdin() (string, error) {
-	data, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}

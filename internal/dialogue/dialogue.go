@@ -20,28 +20,37 @@ import (
 )
 
 //go:embed prompts/kickoff.md
+// KickoffPrompt is the embedded system prompt for the initial charter kickoff turn.
 var KickoffPrompt string
 
 //go:embed prompts/ask_non_goals.md
+// AskNonGoalsPrompt is the embedded system prompt for eliciting non-goals from the user.
 var AskNonGoalsPrompt string
 
 //go:embed prompts/ask_edge_cases.md
+// AskEdgeCasesPrompt is the embedded system prompt for identifying edge cases.
 var AskEdgeCasesPrompt string
 
 //go:embed prompts/ask_blast_radius.md
+// AskBlastRadiusPrompt is the embedded system prompt for analyzing blast radius.
 var AskBlastRadiusPrompt string
 
 //go:embed prompts/ask_constraints.md
+// AskConstraintsPrompt is the embedded system prompt for inferring project constraints.
 var AskConstraintsPrompt string
 
 //go:embed prompts/synthesize.md
+// SynthesizePrompt is the embedded system prompt for the synthesis pass.
 var SynthesizePrompt string
 
 //go:embed prompts/counterspec.md
+// CounterSpecPrompt is the embedded system prompt for the counter-speculative analysis.
 var CounterSpecPrompt string
 
+// GapType enumerates the categories of information the dialogue must fill.
 type GapType string
 
+// Gap types the dialogue tracks.
 const (
 	GapGoal          GapType = "goal"
 	GapContext       GapType = "context"
@@ -58,6 +67,7 @@ const (
 	GapDone          GapType = "done"
 )
 
+// Gap represents a missing piece of information that the dialogue should fill.
 type Gap struct {
 	Type     GapType
 	Priority int
@@ -70,6 +80,7 @@ type routerStreamer interface {
 	Complete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (*models.CompletionResponse, error)
 }
 
+// Dialogue drives an interactive session that fills out a Charter through guided prompts.
 type Dialogue struct {
 	charter         *charter.Charter
 	transcript      []charter.TranscriptTurn
@@ -87,7 +98,8 @@ type Dialogue struct {
 	resumeMode      bool
 }
 
-type DialogueResult struct {
+// Result holds the outcome of a completed dialogue session.
+type Result struct {
 	Charter   *charter.Charter
 	GapsLeft  []Gap
 	TurnsUsed int
@@ -133,6 +145,7 @@ func gapLabel(g GapType) string {
 	}
 }
 
+// New creates a Dialogue ready to fill the given charter.
 func New(c *charter.Charter, router *routing.Router, cfg *config.Config, opts ...Option) *Dialogue {
 	d := &Dialogue{
 		charter:         c,
@@ -152,16 +165,20 @@ func New(c *charter.Charter, router *routing.Router, cfg *config.Config, opts ..
 	return d
 }
 
+// Option configures a Dialogue.
 type Option func(*Dialogue)
 
+// WithBudget sets the maximum number of dialogue turns.
 func WithBudget(n int) Option {
 	return func(d *Dialogue) { d.budget = n }
 }
 
+// WithNonInteractive disables interactive prompts when true.
 func WithNonInteractive(v bool) Option {
 	return func(d *Dialogue) { d.nonInteractive = v }
 }
 
+// WithChannels sets input/output channels for programmatic dialogue interaction.
 func WithChannels(input chan string, output chan string) Option {
 	return func(d *Dialogue) {
 		d.inputChan = input
@@ -169,19 +186,23 @@ func WithChannels(input chan string, output chan string) Option {
 	}
 }
 
+// WithOutput sets the writer used for dialogue output.
 func WithOutput(w io.Writer) Option {
 	return func(d *Dialogue) { d.output = w }
 }
 
+// WithChartersDir sets the directory where charters are persisted between turns.
 func WithChartersDir(dir string) Option {
 	return func(d *Dialogue) { d.chartersDir = dir }
 }
 
+// WithResume enables resume mode, skipping gaps already filled in the charter.
 func WithResume(v bool) Option {
 	return func(d *Dialogue) { d.resumeMode = v }
 }
 
-func (d *Dialogue) Run(ctx context.Context) (*DialogueResult, error) {
+// Run executes the dialogue session, iterating through gaps until the budget is exhausted or all gaps are filled.
+func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 	d.gaps = d.planGaps()
 
 	fmt.Fprintf(d.output, "\n%s\n", styleSection.Render(" Charter Dialogue "))
@@ -252,7 +273,7 @@ func (d *Dialogue) Run(ctx context.Context) (*DialogueResult, error) {
 	fmt.Fprintf(d.output, "  Risk: %s\n", d.charter.Risk)
 	fmt.Fprintf(d.output, "  Turns used: %d\n\n", d.turn)
 
-	return &DialogueResult{
+	return &Result{
 		Charter:   d.charter,
 		GapsLeft:  d.gaps,
 		TurnsUsed: d.turn,
@@ -508,28 +529,29 @@ func (d *Dialogue) sourceSummary() string {
 
 func (d *Dialogue) charterSummary() string {
 	var b strings.Builder
+	bPtr := &b
 	if d.charter.Goal != "" {
-		b.WriteString(fmt.Sprintf("Goal: %s\n", d.charter.Goal))
+		fmt.Fprintf(bPtr, "Goal: %s\n", d.charter.Goal)
 	}
 	if d.charter.Context != "" {
-		b.WriteString(fmt.Sprintf("Context: %s\n", d.charter.Context))
+		fmt.Fprintf(bPtr, "Context: %s\n", d.charter.Context)
 	}
 	if len(d.charter.NonGoals) > 0 {
 		b.WriteString("Non-goals:\n")
 		for _, ng := range d.charter.NonGoals {
-			b.WriteString(fmt.Sprintf("- %s\n", ng))
+			fmt.Fprintf(bPtr, "- %s\n", ng)
 		}
 	}
 	if len(d.charter.AcceptanceCriteria) > 0 {
 		b.WriteString("Acceptance criteria:\n")
 		for _, ac := range d.charter.AcceptanceCriteria {
-			b.WriteString(fmt.Sprintf("- %s (%s)\n", ac.Statement, ac.Verification))
+			fmt.Fprintf(bPtr, "- %s (%s)\n", ac.Statement, ac.Verification)
 		}
 	}
 	if len(d.charter.EdgeCases) > 0 {
 		b.WriteString("Edge cases:\n")
 		for _, ec := range d.charter.EdgeCases {
-			b.WriteString(fmt.Sprintf("- %s\n", ec))
+			fmt.Fprintf(bPtr, "- %s\n", ec)
 		}
 	}
 	if b.Len() == 0 {

@@ -11,6 +11,7 @@ import (
 	"github.com/helloodokai/charter/internal/charter"
 )
 
+// IndexEntry represents a summary record of a charter in the index.
 type IndexEntry struct {
 	ID        string           `yaml:"id"`
 	Goal      string           `yaml:"goal"`
@@ -21,13 +22,15 @@ type IndexEntry struct {
 	Source    charter.Source   `yaml:"source"`
 }
 
+// Index is the collection of charter summary records stored on disk.
 type Index struct {
 	Charters []IndexEntry `yaml:"charters"`
 }
 
+// LoadIndex reads the charter index from the given directory.
 func LoadIndex(dir string) (*Index, error) {
 	path := filepath.Join(dir, "index.yaml")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // expected: user-specified path
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Index{}, nil
@@ -41,8 +44,9 @@ func LoadIndex(dir string) (*Index, error) {
 	return &idx, nil
 }
 
+// SaveIndex writes the charter index to the given directory.
 func SaveIndex(dir string, idx *Index) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating charters dir: %w", err)
 	}
 	path := filepath.Join(dir, "index.yaml")
@@ -53,6 +57,7 @@ func SaveIndex(dir string, idx *Index) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// UpsertIndex adds or updates the charter's entry in the index.
 func UpsertIndex(dir string, c *charter.Charter) error {
 	idx, err := LoadIndex(dir)
 	if err != nil {
@@ -81,6 +86,7 @@ func UpsertIndex(dir string, c *charter.Charter) error {
 	return SaveIndex(dir, idx)
 }
 
+// ListByStatus returns index entries matching the given status, or all entries if status is empty.
 func ListByStatus(dir string, status charter.Status) ([]IndexEntry, error) {
 	idx, err := LoadIndex(dir)
 	if err != nil {
@@ -95,6 +101,7 @@ func ListByStatus(dir string, status charter.Status) ([]IndexEntry, error) {
 	return result, nil
 }
 
+// ChartersDir returns the path to the charters directory under the given root.
 func ChartersDir(root string) string {
 	return filepath.Join(root, ".charters")
 }

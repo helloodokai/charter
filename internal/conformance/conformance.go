@@ -8,8 +8,10 @@ import (
 	"github.com/helloodokai/charter/internal/charter"
 )
 
+// Severity represents the severity level of a conformance finding.
 type Severity string
 
+// SeverityInfo is an informational finding that does not affect the score.
 const (
 	SeverityInfo     Severity = "info"
 	SeverityWarning  Severity = "warning"
@@ -17,6 +19,7 @@ const (
 	SeverityBlocking Severity = "blocking"
 )
 
+// Finding represents a single conformance issue detected by a grader.
 type Finding struct {
 	Critic     string   `json:"critic" yaml:"critic"`
 	Severity   Severity `json:"severity" yaml:"severity"`
@@ -27,6 +30,7 @@ type Finding struct {
 	Line       int      `json:"line,omitempty" yaml:"line,omitempty"`
 }
 
+// Verdict summarises the conformance assessment for a charter.
 type Verdict struct {
 	CharterID string    `json:"charter_id" yaml:"charter_id"`
 	Goal      string    `json:"goal" yaml:"goal"`
@@ -35,15 +39,19 @@ type Verdict struct {
 	Score     float64   `json:"score" yaml:"score"`
 }
 
+// Grader assesses a charter against a diff and returns findings.
 type Grader interface {
 	Name() string
 	Grade(ch *charter.Charter, diff string) []Finding
 }
 
+// BlastRadiusGrader flags files that fall outside the charter's declared blast radius.
 type BlastRadiusGrader struct{}
 
+// Name returns the identifier for the blast radius grader.
 func (g *BlastRadiusGrader) Name() string { return "blast_radius" }
 
+// Grade evaluates blast radius conformance for the given charter and diff.
 func (g *BlastRadiusGrader) Grade(ch *charter.Charter, diff string) []Finding {
 	if len(ch.BlastRadius.Files) == 0 {
 		return nil
@@ -85,10 +93,13 @@ func (g *BlastRadiusGrader) Grade(ch *charter.Charter, diff string) []Finding {
 	return findings
 }
 
+// UnknownGatingGrader flags blocking unknowns that have not been resolved.
 type UnknownGatingGrader struct{}
 
+// Name returns the identifier for the unknown gating grader.
 func (g *UnknownGatingGrader) Name() string { return "unknown_gating" }
 
+// Grade evaluates unknown gating conformance for the given charter and diff.
 func (g *UnknownGatingGrader) Grade(ch *charter.Charter, diff string) []Finding {
 	var findings []Finding
 	for _, u := range ch.Unknowns {
@@ -105,10 +116,13 @@ func (g *UnknownGatingGrader) Grade(ch *charter.Charter, diff string) []Finding 
 	return findings
 }
 
+// NonGoalViolationGrader flags diffs that touch areas declared as non-goals.
 type NonGoalViolationGrader struct{}
 
+// Name returns the identifier for the non-goal violation grader.
 func (g *NonGoalViolationGrader) Name() string { return "non_goal_violation" }
 
+// Grade evaluates non-goal violations for the given charter and diff.
 func (g *NonGoalViolationGrader) Grade(ch *charter.Charter, diff string) []Finding {
 	if len(ch.NonGoals) == 0 {
 		return nil
@@ -144,6 +158,7 @@ func extractKeywords(nonGoals []string) []string {
 	return keywords
 }
 
+// Grade runs all graders against the charter and diff, returning a Verdict.
 func Grade(ch *charter.Charter, diff string) *Verdict {
 	graders := []Grader{
 		&BlastRadiusGrader{},
@@ -160,14 +175,13 @@ func Grade(ch *charter.Charter, diff string) *Verdict {
 	status := "pass"
 	score := 1.0
 	for _, f := range allFindings {
-		if f.Severity == SeverityBlocking {
+		switch f.Severity {
+		case SeverityBlocking:
 			status = "fail"
 			score = 0.0
-			break
-		}
-		if f.Severity == SeverityError {
+		case SeverityError:
 			score -= 0.2
-		} else if f.Severity == SeverityWarning {
+		case SeverityWarning:
 			score -= 0.1
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
+// ValidationError describes a single field-level validation failure.
 type ValidationError struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
@@ -16,6 +17,7 @@ func (e ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
+// ValidationErrors is a collection of validation failures.
 type ValidationErrors []ValidationError
 
 func (errs ValidationErrors) Error() string {
@@ -26,6 +28,7 @@ func (errs ValidationErrors) Error() string {
 	return strings.Join(lines, "\n")
 }
 
+// Validate checks a Charter for required fields and valid enum values, returning any violations.
 func Validate(c *Charter) ValidationErrors {
 	var errs ValidationErrors
 
@@ -86,6 +89,7 @@ func Validate(c *Charter) ValidationErrors {
 	return errs
 }
 
+// JSONSchema returns the JSON Schema representation of the Charter type.
 func JSONSchema() *jsonschema.Schema {
 	return jsonschema.Reflect(&Charter{})
 }

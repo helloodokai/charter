@@ -65,7 +65,9 @@ func runLs(cmd *cobra.Command, args []string) error {
 			e.CreatedAt.Format("2006-01-02"),
 		)
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("flushing output: %w", err)
+	}
 	return nil
 }
 

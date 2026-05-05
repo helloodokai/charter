@@ -10,14 +10,17 @@ import (
 	"github.com/helloodokai/charter/internal/charter"
 )
 
+// IssueSource fetches charter source material from a GitHub issue.
 type IssueSource struct {
 	client *github.Client
 }
 
+// NewIssueSource returns a new IssueSource using the given GitHub client.
 func NewIssueSource(client *github.Client) *IssueSource {
 	return &IssueSource{client: client}
 }
 
+// IssueInfo holds parsed data from a GitHub issue and its comments.
 type IssueInfo struct {
 	Owner    string
 	Repo     string
@@ -28,6 +31,7 @@ type IssueInfo struct {
 	URL      string
 }
 
+// ParseIssueURL extracts the owner, repo, and issue number from a GitHub issue URL.
 func ParseIssueURL(url string) (owner, repo string, number int, err error) {
 	parts := strings.Split(strings.TrimPrefix(url, "https://github.com/"), "/")
 	if len(parts) < 4 {
@@ -45,6 +49,7 @@ func ParseIssueURL(url string) (owner, repo string, number int, err error) {
 	return owner, repo, number, nil
 }
 
+// Fetch retrieves the GitHub issue and its comments, returning an IssueInfo.
 func (s *IssueSource) Fetch(ctx context.Context, owner, repo string, number int) (*IssueInfo, error) {
 	issue, _, err := s.client.Issues.Get(ctx, owner, repo, number)
 	if err != nil {
@@ -87,6 +92,7 @@ func (s *IssueSource) Fetch(ctx context.Context, owner, repo string, number int)
 	}, nil
 }
 
+// ToSource converts the IssueInfo into a charter Source.
 func (info *IssueInfo) ToSource() charter.Source {
 	raw := info.Title + "\n\n" + info.Body
 	if len(info.Comments) > 0 {

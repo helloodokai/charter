@@ -48,21 +48,26 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("generating config: %w", err)
 	}
 
-	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
-		return fmt.Errorf("writing .charter.toml: %w", err)
+	if writeErr := os.WriteFile(cfgPath, data, 0o644); writeErr != nil {
+		return fmt.Errorf("writing .charter.toml: %w", writeErr)
 	}
 	fmt.Fprintf(os.Stderr, "  Created .charter.toml\n")
 
-	if err := os.MkdirAll(chartersDir, 0755); err != nil {
-		return fmt.Errorf("creating .charters/: %w", err)
+	if mkdirErr := os.MkdirAll(chartersDir, 0o750); mkdirErr != nil {
+		return fmt.Errorf("creating .charters/: %w", mkdirErr)
 	}
 	fmt.Fprintf(os.Stderr, "  Created .charters/\n")
 
 	gitignorePath := filepath.Join(repoRoot, ".gitignore")
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		f.WriteString("\n# Charter\n.charters/*.yaml\n!.charters/index.yaml\n")
-		f.Close()
+	f, openErr := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // expected perms for gitignore
+	if openErr == nil {
+		if _, err := f.WriteString("\n# Charter\n.charters/*.yaml\n!.charters/index.yaml\n"); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("writing .gitignore: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("closing .gitignore: %w", err)
+		}
 		fmt.Fprintf(os.Stderr, "  Updated .gitignore\n")
 	}
 

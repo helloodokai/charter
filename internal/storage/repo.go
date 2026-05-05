@@ -10,8 +10,9 @@ import (
 	"github.com/helloodokai/charter/internal/charter"
 )
 
+// Save writes a charter to the given directory as a YAML file.
 func Save(dir string, c *charter.Charter) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating charters dir: %w", err)
 	}
 	path := filepath.Join(dir, c.ID+".yaml")
@@ -22,6 +23,7 @@ func Save(dir string, c *charter.Charter) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// LoadByID reads a charter from the given directory by its ID.
 func LoadByID(dir string, id string) (*charter.Charter, error) {
 	path := filepath.Join(dir, id+".yaml")
 	return charter.Load(path)

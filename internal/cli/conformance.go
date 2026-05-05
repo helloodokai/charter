@@ -49,11 +49,11 @@ func runConformance(cmd *cobra.Command, args []string) error {
 
 	switch {
 	case confDiff == "-":
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("reading diff from stdin: %w", err)
+		stdinData, stdinErr := io.ReadAll(os.Stdin)
+		if stdinErr != nil {
+			return fmt.Errorf("reading diff from stdin: %w", stdinErr)
 		}
-		diffContent = string(data)
+		diffContent = string(stdinData)
 
 	case confDiff != "":
 		diffContent, err = getDiff(confDiff)
@@ -64,11 +64,11 @@ func runConformance(cmd *cobra.Command, args []string) error {
 	default:
 		stat, _ := os.Stdin.Stat()
 		if (stat.Mode() & os.ModeCharDevice) == 0 {
-			data, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("reading diff from stdin: %w", err)
+			pipedData, pipedErr := io.ReadAll(os.Stdin)
+			if pipedErr != nil {
+				return fmt.Errorf("reading diff from stdin: %w", pipedErr)
 			}
-			diffContent = string(data)
+			diffContent = string(pipedData)
 		} else {
 			return fmt.Errorf("--diff is required (e.g. --diff HEAD..feature, or pipe diff via stdin)")
 		}

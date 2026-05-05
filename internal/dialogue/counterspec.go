@@ -9,6 +9,7 @@ import (
 	"github.com/helloodokai/charter/internal/models"
 )
 
+// RunCounterSpec executes a counter-speculative analysis against the current charter using the frontier model.
 func (d *Dialogue) RunCounterSpec(ctx context.Context) (*charter.CounterSpec, error) {
 	summary := d.charterSummary()
 	resp, err := d.routingStreamer.Complete(ctx, models.Frontier, models.CompletionRequest{
@@ -22,6 +23,7 @@ func (d *Dialogue) RunCounterSpec(ctx context.Context) (*charter.CounterSpec, er
 	return &cs, nil
 }
 
+// AskCounterSpecReview presents the counter-spec findings to the user for interactive review and filtering.
 func (d *Dialogue) AskCounterSpecReview(ctx context.Context, cs *charter.CounterSpec) error {
 	if d.nonInteractive {
 		d.charter.CounterSpec = *cs
@@ -37,7 +39,9 @@ func (d *Dialogue) AskCounterSpecReview(ctx context.Context, cs *charter.Counter
 		var confirm bool
 		fmt.Print("Keep this in the charter? (y/n): ")
 		var input string
-		fmt.Scanln(&input)
+		if _, err := fmt.Scanln(&input); err != nil {
+			return fmt.Errorf("reading input: %w", err)
+		}
 		confirm = strings.ToLower(strings.TrimSpace(input)) == "y" || strings.ToLower(strings.TrimSpace(input)) == "yes"
 		if confirm {
 			kept = append(kept, m)

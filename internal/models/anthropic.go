@@ -11,11 +11,13 @@ import (
 	"github.com/helloodokai/charter/internal/config"
 )
 
+// AnthropicClient implements Client for the Anthropic API.
 type AnthropicClient struct {
 	client *anthropic.Client
 	apiKey string
 }
 
+// NewAnthropicClient creates a new Anthropic client from the given config.
 func NewAnthropicClient(cfg config.AnthropicConfig) *AnthropicClient {
 	opts := []option.RequestOption{}
 	if cfg.APIKey != "" {
@@ -28,6 +30,7 @@ func NewAnthropicClient(cfg config.AnthropicConfig) *AnthropicClient {
 	}
 }
 
+// Complete sends a non-streaming completion request to Anthropic.
 func (c *AnthropicClient) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
 	var messages []anthropic.MessageParam
 	for _, m := range req.Messages {
@@ -82,6 +85,7 @@ func (c *AnthropicClient) Complete(ctx context.Context, req CompletionRequest) (
 	}, nil
 }
 
+// Stream sends a streaming completion request to Anthropic, writing tokens to w.
 func (c *AnthropicClient) Stream(ctx context.Context, req CompletionRequest, w io.Writer) (*CompletionResponse, error) {
 	var messages []anthropic.MessageParam
 	for _, m := range req.Messages {
@@ -157,6 +161,7 @@ func (c *AnthropicClient) Stream(ctx context.Context, req CompletionRequest, w i
 	}, nil
 }
 
+// Name returns the provider name for the Anthropic client.
 func (c *AnthropicClient) Name() string {
 	return "anthropic"
 }

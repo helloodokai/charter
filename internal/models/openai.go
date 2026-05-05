@@ -11,11 +11,13 @@ import (
 	"github.com/helloodokai/charter/internal/config"
 )
 
+// OpenAIClient implements Client for the OpenAI API.
 type OpenAIClient struct {
 	client *openai.Client
 	apiKey string
 }
 
+// NewOpenAIClient creates a new OpenAI client from the given config.
 func NewOpenAIClient(cfg config.OpenAIConfig) *OpenAIClient {
 	opts := []option.RequestOption{}
 	if cfg.APIKey != "" {
@@ -28,6 +30,7 @@ func NewOpenAIClient(cfg config.OpenAIConfig) *OpenAIClient {
 	}
 }
 
+// Complete sends a non-streaming completion request to OpenAI.
 func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
 	var messages []openai.ChatCompletionMessageParamUnion
 	if req.System != "" {
@@ -70,6 +73,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 	}, nil
 }
 
+// Stream sends a streaming completion request to OpenAI, writing tokens to w.
 func (c *OpenAIClient) Stream(ctx context.Context, req CompletionRequest, w io.Writer) (*CompletionResponse, error) {
 	var messages []openai.ChatCompletionMessageParamUnion
 	if req.System != "" {
@@ -127,6 +131,7 @@ func (c *OpenAIClient) Stream(ctx context.Context, req CompletionRequest, w io.W
 	}, nil
 }
 
+// Name returns the provider name for the OpenAI client.
 func (c *OpenAIClient) Name() string {
 	return "openai"
 }
