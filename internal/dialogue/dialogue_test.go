@@ -1,12 +1,16 @@
 package dialogue
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/helloodokai/charter/internal/charter"
 	"github.com/helloodokai/charter/internal/config"
+	"github.com/helloodokai/charter/internal/models"
 )
 
 func TestParseGoalContext(t *testing.T) {
@@ -82,4 +86,338 @@ func TestPlanGapsWithGoal(t *testing.T) {
 
 func defaultTestConfig() *config.Config {
 	return config.Default()
+}
+
+// --- Resume mode tests ---
+
+func TestPlanGapsResumeSkipsPopulatedFields(t *testing.T) {
+	c := charter.New("Add login page", charter.Source{Type: "stdin"}, "tester")
+	c.Context = "Existing context"
+	c.NonGoals = []string{"no admin panel"}
+	c.AcceptanceCriteria = []charter.AcceptanceCriterion{
+		{ID: "ac-1", Statement: "works", Verification: "test"},
+	}
+	c.EdgeCases = []string{"timeout"}
+	c.BlastRadius = charter.BlastRadius{
+		Files:    []string{"src/auth/**"},
+		Services: []string{"auth-service"},
+	}
+	c.Constraints = charter.Constraints{
+		Performance:  []string{"p99 < 100ms"},
+		Security:     []string{"OAuth2"},
+		Compatibility: []string{"v1 API"},
+		Style:        []string{"existing patterns"},
+		Dependencies: []string{"Go 1.22"},
+	}
+	c.Unknowns = []charter.Unknown{
+		{ID: "unk-1", Question: "what about X?", Blocking: true},
+	}
+	c.Risk = charter.RiskLow
+	c.RollbackPlan = "revert the deployment"
+
+	d := &Dialogue{
+		charter:    c,
+		cfg:        defaultTestConfig(),
+		resumeMode: true,
+		output:     io.Discard,
+	}
+
+	gaps := d.planGaps()
+
+	gapTypes := make(map[GapType]bool)
+	for _, g := range gaps {
+		gapTypes[g.Type] = true
+	}
+
+	require.False(t, gapTypes[GapGoal], "should skip goal when already set")
+	require.False(t, gapTypes[GapContext], "should skip context when already set")
+	require.False(t, gapTypes[GapNonGoals], "should skip non-goals when already set with resume")
+	require.False(t, gapTypes[GapAcceptance], "should skip acceptance when already set with resume")
+	require.False(t, gapTypes[GapEdgeCases], "should skip edge cases when already set with resume")
+	require.False(t, gapTypes[GapBlastRadius], "should skip blast radius when already set")
+	require.False(t, gapTypes[GapConstraints], "should skip constraints when already set with resume")
+	require.False(t, gapTypes[GapUnknowns], "should skip unknowns when already set")
+	require.False(t, gapTypes[GapRisk], "should skip risk when already set with resume")
+	require.False(t, gapTypes[GapRollback], "should skip rollback when already set with resume")
+
+	require.True(t, gapTypes[GapSynthesize], "should always include synthesize")
+	require.True(t, gapTypes[GapCounterSpec], "should always include counterspec")
+}
+
+func TestPlanGapsWithoutResumeIncludesAllGaps(t *testing.T) {
+	c := charter.New("Add login page", charter.Source{Type: "stdin"}, "tester")
+	c.Context = "Existing context"
+	c.NonGoals = []string{"no admin panel"}
+	c.AcceptanceCriteria = []charter.AcceptanceCriterion{
+		{ID: "ac-1", Statement: "works", Verification: "test"},
+	}
+	c.EdgeCases = []string{"timeout"}
+	c.BlastRadius = charter.BlastRadius{
+		Files:    []string{"src/auth/**"},
+		Services: []string{"auth-service"},
+	}
+	c.Constraints = charter.Constraints{
+		Performance:  []string{"p99 < 100ms"},
+		Security:     []string{"OAuth2"},
+		Compatibility: []string{"v1 API"},
+		Style:        []string{"existing patterns"},
+		Dependencies: []string{"Go 1.22"},
+	}
+	c.Unknowns = []charter.Unknown{
+		{ID: "unk-1", Question: "what about X?", Blocking: true},
+	}
+	c.Risk = charter.RiskLow
+	c.RollbackPlan = "revert the deployment"
+
+	d := &Dialogue{
+		charter:    c,
+		cfg:        defaultTestConfig(),
+		resumeMode: false,
+		output:     io.Discard,
+	}
+
+	gaps := d.planGaps()
+
+	gapTypes := make(map[GapType]bool)
+	for _, g := range gaps {
+		gapTypes[g.Type] = true
+	}
+
+	require.False(t, gapTypes[GapGoal], "goal is set, skipped regardless of resume")
+	require.False(t, gapTypes[GapContext], "context is set, skipped regardless of resume")
+	require.True(t, gapTypes[GapNonGoals], "non-goals re-asked without resume even when populated")
+	require.True(t, gapTypes[GapAcceptance], "acceptance criteria re-asked without resume even when populated")
+	require.True(t, gapTypes[GapEdgeCases], "edge cases re-asked without resume even when populated")
+	require.False(t, gapTypes[GapBlastRadius], "blast radius has data, skipped regardless of resume")
+	require.True(t, gapTypes[GapConstraints], "constraints re-asked without resume even when populated")
+	require.False(t, gapTypes[GapUnknowns], "unknowns has data, skipped regardless of resume")
+	require.True(t, gapTypes[GapRisk], "risk re-asked without resume even when populated")
+}
+
+func TestPlanGapsResumeEmptyCharterStillIncludesGoal(t *testing.T) {
+	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
+
+	d := &Dialogue{
+		charter:    c,
+		cfg:        defaultTestConfig(),
+		resumeMode: true,
+		output:     io.Discard,
+	}
+
+	gaps := d.planGaps()
+
+	gapTypes := make(map[GapType]bool)
+	for _, g := range gaps {
+		gapTypes[g.Type] = true
+	}
+
+	require.True(t, gapTypes[GapGoal], "should include Goal when empty even with resume")
+	require.True(t, gapTypes[GapSynthesize], "should always include synthesize")
+	require.True(t, gapTypes[GapCounterSpec], "should always include counterspec")
+}
+
+func TestPlanGapsResumeSkipsBlastRadiusButNotBlastRadiusGapWhenEmpty(t *testing.T) {
+	c := charter.New("My goal", charter.Source{Type: "stdin"}, "tester")
+	c.Context = "Some context"
+
+	d := &Dialogue{
+		charter:    c,
+		cfg:        defaultTestConfig(),
+		resumeMode: true,
+		output:     io.Discard,
+	}
+
+	gaps := d.planGaps()
+
+	gapTypes := make(map[GapType]bool)
+	for _, g := range gaps {
+		gapTypes[g.Type] = true
+	}
+
+	require.True(t, gapTypes[GapBlastRadius], "should include BlastRadius when empty even with resume")
+	require.True(t, gapTypes[GapNonGoals], "should include NonGoals when empty even with resume (list is empty)")
+}
+
+func TestWithResumeOption(t *testing.T) {
+	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
+	d := New(c, nil, defaultTestConfig(), WithResume(true))
+	require.True(t, d.resumeMode)
+}
+
+func TestWithResumeFalseOption(t *testing.T) {
+	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
+	d := New(c, nil, defaultTestConfig(), WithResume(false))
+	require.False(t, d.resumeMode)
+}
+
+func TestWithChartersDirOption(t *testing.T) {
+	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
+	d := New(c, nil, defaultTestConfig(), WithChartersDir("/tmp/charters-test"))
+	require.Equal(t, "/tmp/charters-test", d.chartersDir)
+}
+
+func TestWithOutputOption(t *testing.T) {
+	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
+	buf := &bytes.Buffer{}
+	d := New(c, nil, defaultTestConfig(), WithOutput(buf))
+	require.Equal(t, buf, d.output)
+}
+
+// --- Transcript persistence tests ---
+
+func TestPersistTranscriptNoOpWhenDirEmpty(t *testing.T) {
+	c := charter.New("test goal", charter.Source{Type: "stdin"}, "tester")
+	c.Transcript = []charter.TranscriptTurn{
+		{Role: "human", Content: "hello"},
+	}
+
+	d := &Dialogue{
+		charter:     c,
+		transcript:  c.Transcript,
+		cfg:         defaultTestConfig(),
+		chartersDir: "",
+		output:      io.Discard,
+	}
+
+	d.persistTranscript()
+}
+
+func TestPersistTranscriptSavesToDisk(t *testing.T) {
+	tmpDir := t.TempDir()
+	c := charter.New("test goal", charter.Source{Type: "stdin"}, "tester")
+	c.Transcript = []charter.TranscriptTurn{
+		{Role: "human", Content: "hello"},
+		{Role: "tool", Content: "response"},
+	}
+
+	d := &Dialogue{
+		charter:     c,
+		transcript:  c.Transcript,
+		cfg:         defaultTestConfig(),
+		chartersDir: tmpDir,
+		output:      io.Discard,
+	}
+
+	d.persistTranscript()
+
+	loaded, err := charter.Load(c.FilePath(tmpDir))
+	require.NoError(t, err)
+	require.Equal(t, "test goal", loaded.Goal)
+	require.Len(t, loaded.Transcript, 2)
+	require.Equal(t, "human", loaded.Transcript[0].Role)
+	require.Equal(t, "hello", loaded.Transcript[0].Content)
+	require.Equal(t, "tool", loaded.Transcript[1].Role)
+	require.Equal(t, "response", loaded.Transcript[1].Content)
+}
+
+func TestPersistTranscriptUpdatesOnDiskEachCall(t *testing.T) {
+	tmpDir := t.TempDir()
+	c := charter.New("test goal", charter.Source{Type: "stdin"}, "tester")
+
+	d := &Dialogue{
+		charter:     c,
+		transcript:  nil,
+		cfg:         defaultTestConfig(),
+		chartersDir: tmpDir,
+		output:      io.Discard,
+	}
+
+	d.transcript = append(d.transcript, charter.TranscriptTurn{Role: "human", Content: "first"})
+	d.persistTranscript()
+
+	loaded, err := charter.Load(c.FilePath(tmpDir))
+	require.NoError(t, err)
+	require.Len(t, loaded.Transcript, 1)
+
+	d.transcript = append(d.transcript, charter.TranscriptTurn{Role: "tool", Content: "second"})
+	d.persistTranscript()
+
+	loaded, err = charter.Load(c.FilePath(tmpDir))
+	require.NoError(t, err)
+	require.Len(t, loaded.Transcript, 2)
+}
+
+// --- streamComplete tests ---
+
+type mockRouterClient struct {
+	resp *models.CompletionResponse
+	err  error
+}
+
+func (m *mockRouterClient) Stream(ctx context.Context, tier models.Tier, req models.CompletionRequest, w io.Writer) (*models.CompletionResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.resp != nil && m.resp.Content != "" {
+		_, _ = w.Write([]byte(m.resp.Content))
+	}
+	return m.resp, nil
+}
+
+func (m *mockRouterClient) Complete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (*models.CompletionResponse, error) {
+	return m.resp, m.err
+}
+
+type mockStreamingRouter struct {
+	client *mockRouterClient
+}
+
+func (m *mockStreamingRouter) Stream(ctx context.Context, tier models.Tier, req models.CompletionRequest, w io.Writer) (*models.CompletionResponse, error) {
+	return m.client.Stream(ctx, tier, req, w)
+}
+
+func (m *mockStreamingRouter) Complete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (*models.CompletionResponse, error) {
+	return m.client.Complete(ctx, tier, req)
+}
+
+var _ routerStreamer = (*mockStreamingRouter)(nil)
+
+func TestStreamCompleteCallsRouterAndReturnsContent(t *testing.T) {
+	mockClient := &mockRouterClient{
+		resp: &models.CompletionResponse{
+			Content: "Hello from stream",
+			Model:   "test-model",
+			Usage:   models.Usage{InputTokens: 10, OutputTokens: 5},
+		},
+	}
+
+	router := &mockStreamingRouter{client: mockClient}
+	buf := &bytes.Buffer{}
+
+	d := &Dialogue{
+		charter: charter.New("test", charter.Source{Type: "stdin"}, "tester"),
+		cfg:     defaultTestConfig(),
+		output:  buf,
+		routingStreamer: router,
+	}
+
+	content, err := d.streamComplete(context.Background(), models.Mid, models.CompletionRequest{
+		Messages: []models.Message{{Role: "user", Content: "hello"}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "Hello from stream", content)
+}
+
+func TestStreamCompleteReturnsErrorOnRouterFailure(t *testing.T) {
+	mockClient := &mockRouterClient{
+		err: context.DeadlineExceeded,
+	}
+
+	router := &mockStreamingRouter{client: mockClient}
+	buf := &bytes.Buffer{}
+
+	d := &Dialogue{
+		charter: charter.New("test", charter.Source{Type: "stdin"}, "tester"),
+		cfg:     defaultTestConfig(),
+		output:  buf,
+		routingStreamer: router,
+	}
+
+	content, err := d.streamComplete(context.Background(), models.Mid, models.CompletionRequest{
+		Messages: []models.Message{{Role: "user", Content: "hello"}},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, "", content)
 }

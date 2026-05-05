@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"io"
 )
 
 type Tier string
@@ -18,10 +19,10 @@ type Message struct {
 }
 
 type CompletionRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	System   string    `json:"system,omitempty"`
-	MaxTokens int      `json:"max_tokens,omitempty"`
+	Model     string    `json:"model"`
+	Messages  []Message `json:"messages"`
+	System    string    `json:"system,omitempty"`
+	MaxTokens int       `json:"max_tokens,omitempty"`
 }
 
 type CompletionResponse struct {
@@ -35,8 +36,24 @@ type Usage struct {
 	OutputTokens int
 }
 
+type StreamEvent struct {
+	Type    StreamEventType
+	Content string
+	Usage   *Usage
+}
+
+type StreamEventType int
+
+const (
+	StreamToken StreamEventType = iota
+	StreamDone
+)
+
+type StreamingCallback func(event StreamEvent)
+
 type Client interface {
 	Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error)
+	Stream(ctx context.Context, req CompletionRequest, w io.Writer) (*CompletionResponse, error)
 	Name() string
 }
 
@@ -48,4 +65,3 @@ const (
 	ProviderAnthropic   Provider = "anthropic"
 	ProviderOpenAI      Provider = "openai"
 )
-

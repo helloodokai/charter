@@ -3,6 +3,7 @@ package routing
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/helloodokai/charter/internal/config"
@@ -10,8 +11,8 @@ import (
 )
 
 type Router struct {
-	clients map[models.Provider]models.Client
-	profile config.ProfileConfig
+	clients  map[models.Provider]models.Client
+	profile  config.ProfileConfig
 	fallback *config.ProfileConfig
 }
 
@@ -56,6 +57,17 @@ func (r *Router) Complete(ctx context.Context, tier models.Tier, req models.Comp
 	return resp, err
 }
 
+func (r *Router) Stream(ctx context.Context, tier models.Tier, req models.CompletionRequest, w io.Writer) (*models.CompletionResponse, error) {
+	ref := r.tierRef(tier)
+	resp, err := r.streamWithRef(ctx, ref, req, w)
+	if err != nil && r.fallback != nil {
+		slog.Warn("primary provider failed, trying fallback", "tier", tier, "error", err)
+		fbRef := r.fallbackTierRef(tier)
+		return r.streamWithRef(ctx, fbRef, req, w)
+	}
+	return resp, err
+}
+
 func (r *Router) completeWithRef(ctx context.Context, ref config.ModelRef, req models.CompletionRequest) (*models.CompletionResponse, error) {
 	client, ok := r.clients[models.Provider(ref.Provider)]
 	if !ok {
@@ -64,6 +76,16 @@ func (r *Router) completeWithRef(ctx context.Context, ref config.ModelRef, req m
 	req.Model = ref.Name
 	slog.Debug("routing completion", "provider", ref.Provider, "model", ref.Name, "tier", req.Model)
 	return client.Complete(ctx, req)
+}
+
+func (r *Router) streamWithRef(ctx context.Context, ref config.ModelRef, req models.CompletionRequest, w io.Writer) (*models.CompletionResponse, error) {
+	client, ok := r.clients[models.Provider(ref.Provider)]
+	if !ok {
+		return nil, fmt.Errorf("no client for provider %q", ref.Provider)
+	}
+	req.Model = ref.Name
+	slog.Debug("routing stream", "provider", ref.Provider, "model", ref.Name)
+	return client.Stream(ctx, req, w)
 }
 
 func (r *Router) tierRef(tier models.Tier) config.ModelRef {

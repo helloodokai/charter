@@ -315,3 +315,24 @@ func parseConstraints(text string) charter.Constraints {
 	}
 	return c
 }
+
+func parseCounterSpec(content string) charter.CounterSpec {
+	var cs charter.CounterSpec
+	lines := strings.Split(content, "\n")
+	var inAmbiguity bool
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "MISINTERPRETATION") {
+			inAmbiguity = false
+			after := strings.SplitN(line, ":", 2)
+			if len(after) > 1 {
+				cs.Misinterpretations = append(cs.Misinterpretations, strings.TrimSpace(after[1]))
+			}
+		} else if strings.HasPrefix(line, "AMBIGUITIES") {
+			inAmbiguity = true
+		} else if inAmbiguity && strings.HasPrefix(line, "-") {
+			cs.AmbiguitiesFlagged = append(cs.AmbiguitiesFlagged, strings.TrimPrefix(line, "- "))
+		}
+	}
+	return cs
+}

@@ -95,8 +95,13 @@ func runDraft(cmd *cobra.Command, args []string) error {
 		c = charter.New(goal, source, currentUser())
 	}
 
+	repoRoot, _ := cmd.Flags().GetString("repo-root")
+	chartersDir := cfg.ChartersDir(repoRoot)
+
 	opts := []dialogue.Option{
 		dialogue.WithNonInteractive(draftNonInteractive),
+		dialogue.WithChartersDir(chartersDir),
+		dialogue.WithResume(draftResume != ""),
 	}
 	if draftTurnBudget > 0 {
 		opts = append(opts, dialogue.WithBudget(draftTurnBudget))
@@ -112,9 +117,6 @@ func runDraft(cmd *cobra.Command, args []string) error {
 		result.Charter.Transcript = nil
 	}
 
-	repoRoot, _ := cmd.Flags().GetString("repo-root")
-	chartersDir := cfg.ChartersDir(repoRoot)
-
 	if draftOut != "" {
 		if saveErr := result.Charter.Save(filepath.Dir(draftOut)); saveErr != nil {
 			return fmt.Errorf("saving charter: %w", saveErr)
@@ -129,11 +131,6 @@ func runDraft(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "Charter saved: .charters/%s.yaml\n", result.Charter.ID)
 	}
-
-	fmt.Fprintf(os.Stderr, "  Goal: %s\n", result.Charter.Goal)
-	fmt.Fprintf(os.Stderr, "  Status: %s\n", result.Charter.Status)
-	fmt.Fprintf(os.Stderr, "  Risk: %s\n", result.Charter.Risk)
-	fmt.Fprintf(os.Stderr, "  Turns used: %d\n", result.TurnsUsed)
 
 	return nil
 }

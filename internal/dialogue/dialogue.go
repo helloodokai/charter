@@ -4,11 +4,14 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/helloodokai/charter/internal/charter"
 	"github.com/helloodokai/charter/internal/config"
@@ -62,17 +65,26 @@ type Gap struct {
 	Field    string
 }
 
+type routerStreamer interface {
+	Stream(ctx context.Context, tier models.Tier, req models.CompletionRequest, w io.Writer) (*models.CompletionResponse, error)
+	Complete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (*models.CompletionResponse, error)
+}
+
 type Dialogue struct {
-	charter     *charter.Charter
-	transcript  []charter.TranscriptTurn
-	gaps        []Gap
-	turn        int
-	budget      int
-	router      *routing.Router
-	cfg         *config.Config
-	nonInteractive bool
-	inputChan   chan string
-	outputChan  chan string
+	charter         *charter.Charter
+	transcript      []charter.TranscriptTurn
+	gaps            []Gap
+	turn            int
+	budget          int
+	router          *routing.Router
+	routingStreamer routerStreamer
+	cfg             *config.Config
+	nonInteractive  bool
+	inputChan       chan string
+	outputChan      chan string
+	output          io.Writer
+	chartersDir     string
+	resumeMode      bool
 }
 
 type DialogueResult struct {
@@ -81,16 +93,61 @@ type DialogueResult struct {
 	TurnsUsed int
 }
 
+var (
+	styleGap     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	styleThink   = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("8"))
+	styleSection = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
+	styleDim     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	styleAccent  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
+	styleWarn    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
+)
+
+func gapLabel(g GapType) string {
+	switch g {
+	case GapGoal:
+		return "Goal"
+	case GapContext:
+		return "Context"
+	case GapNonGoals:
+		return "Non-Goals"
+	case GapAcceptance:
+		return "Acceptance Criteria"
+	case GapEdgeCases:
+		return "Edge Cases"
+	case GapBlastRadius:
+		return "Blast Radius"
+	case GapConstraints:
+		return "Constraints"
+	case GapUnknowns:
+		return "Unknowns"
+	case GapRisk:
+		return "Risk Assessment"
+	case GapRollback:
+		return "Rollback Plan"
+	case GapSynthesize:
+		return "Synthesis"
+	case GapCounterSpec:
+		return "Counter-Spec Review"
+	default:
+		return string(g)
+	}
+}
+
 func New(c *charter.Charter, router *routing.Router, cfg *config.Config, opts ...Option) *Dialogue {
 	d := &Dialogue{
-		charter:    c,
-		transcript: c.Transcript,
-		budget:      cfg.Dialogue.TurnBudget,
-		router:      router,
-		cfg:         cfg,
+		charter:         c,
+		transcript:      c.Transcript,
+		budget:          cfg.Dialogue.TurnBudget,
+		router:          router,
+		routingStreamer: router,
+		cfg:             cfg,
+		output:          os.Stderr,
 	}
 	for _, opt := range opts {
 		opt(d)
+	}
+	if d.routingStreamer == nil {
+		d.routingStreamer = router
 	}
 	return d
 }
@@ -112,8 +169,23 @@ func WithChannels(input chan string, output chan string) Option {
 	}
 }
 
+func WithOutput(w io.Writer) Option {
+	return func(d *Dialogue) { d.output = w }
+}
+
+func WithChartersDir(dir string) Option {
+	return func(d *Dialogue) { d.chartersDir = dir }
+}
+
+func WithResume(v bool) Option {
+	return func(d *Dialogue) { d.resumeMode = v }
+}
+
 func (d *Dialogue) Run(ctx context.Context) (*DialogueResult, error) {
 	d.gaps = d.planGaps()
+
+	fmt.Fprintf(d.output, "\n%s\n", styleSection.Render(" Charter Dialogue "))
+	fmt.Fprintf(d.output, "%s\n\n", styleDim.Render(fmt.Sprintf("Turns: 0/%d | Gaps: %d", d.budget, len(d.gaps))))
 
 	for d.turn < d.budget && len(d.gaps) > 0 {
 		gap := d.gaps[0]
@@ -121,12 +193,14 @@ func (d *Dialogue) Run(ctx context.Context) (*DialogueResult, error) {
 			break
 		}
 
+		fmt.Fprintf(d.output, "\n%s\n", styleGap.Render(fmt.Sprintf("▸ Step %d: %s", d.turn+1, gapLabel(gap.Type))))
+
 		question, err := d.generateQuestion(ctx, gap)
 		if err != nil {
 			return nil, fmt.Errorf("turn %d: generating question for %s: %w", d.turn, gap.Type, err)
 		}
 
-		answer, err := d.askUser(ctx, question)
+		answer, err := d.askUser(ctx, gap, question)
 		if err != nil {
 			return nil, fmt.Errorf("turn %d: asking user: %w", d.turn, err)
 		}
@@ -141,15 +215,27 @@ func (d *Dialogue) Run(ctx context.Context) (*DialogueResult, error) {
 
 		d.gaps = d.gaps[1:]
 		d.turn++
+
+		d.persistTranscript()
+
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render(fmt.Sprintf("  Turns: %d/%d | Remaining: %d", d.turn, d.budget, len(d.gaps))))
 	}
 
+	fmt.Fprintf(d.output, "\n%s ", styleThink.Render("Synthesizing charter"))
 	if err := d.synthesize(ctx); err != nil {
+		fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render("⚠ Synthesis had issues, charter may be incomplete"))
 		slog.Warn("synthesis failed, charter may be incomplete", "error", err)
+	} else {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("done."))
 	}
 
 	if d.cfg.Dialogue.RequireCounterSpec {
+		fmt.Fprintf(d.output, "\n%s ", styleThink.Render("Running counter-spec review"))
 		if err := d.counterspec(ctx); err != nil {
+			fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render("⚠ Counter-spec pass failed"))
 			slog.Warn("counter-spec pass failed", "error", err)
+		} else {
+			fmt.Fprintf(d.output, "%s\n", styleDim.Render("done."))
 		}
 	}
 
@@ -159,6 +245,12 @@ func (d *Dialogue) Run(ctx context.Context) (*DialogueResult, error) {
 	if d.charter.Status == charter.StatusDraft && len(d.charter.AcceptanceCriteria) > 0 && d.charter.Goal != "" {
 		d.charter.Status = charter.StatusReady
 	}
+
+	fmt.Fprintf(d.output, "\n%s\n", styleSection.Render(" ✓ Charter Complete "))
+	fmt.Fprintf(d.output, "  Goal: %s\n", d.charter.Goal)
+	fmt.Fprintf(d.output, "  Status: %s\n", d.charter.Status)
+	fmt.Fprintf(d.output, "  Risk: %s\n", d.charter.Risk)
+	fmt.Fprintf(d.output, "  Turns used: %d\n\n", d.turn)
 
 	return &DialogueResult{
 		Charter:   d.charter,
@@ -172,27 +264,58 @@ func (d *Dialogue) planGaps() []Gap {
 
 	if d.charter.Goal == "" {
 		gaps = append(gaps, Gap{Type: GapGoal, Priority: 0})
+	} else if d.resumeMode {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Goal already set — skipping"))
 	}
 	if d.charter.Context == "" {
 		gaps = append(gaps, Gap{Type: GapContext, Priority: 1})
+	} else if d.resumeMode {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Context already set — skipping"))
 	}
-	gaps = append(gaps, Gap{Type: GapNonGoals, Priority: 2})
-	gaps = append(gaps, Gap{Type: GapAcceptance, Priority: 3})
-	gaps = append(gaps, Gap{Type: GapEdgeCases, Priority: 4})
+	if len(d.charter.NonGoals) == 0 || !d.resumeMode {
+		gaps = append(gaps, Gap{Type: GapNonGoals, Priority: 2})
+	} else {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Non-goals already set — skipping"))
+	}
+	if len(d.charter.AcceptanceCriteria) == 0 || !d.resumeMode {
+		gaps = append(gaps, Gap{Type: GapAcceptance, Priority: 3})
+	} else if d.resumeMode {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Acceptance criteria already set — skipping"))
+	}
+	if len(d.charter.EdgeCases) == 0 || !d.resumeMode {
+		gaps = append(gaps, Gap{Type: GapEdgeCases, Priority: 4})
+	} else if d.resumeMode {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Edge cases already set — skipping"))
+	}
 	if len(d.charter.BlastRadius.Files) == 0 && len(d.charter.BlastRadius.Services) == 0 {
 		gaps = append(gaps, Gap{Type: GapBlastRadius, Priority: 5})
+	} else if d.resumeMode {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Blast radius already set — skipping"))
 	}
-	gaps = append(gaps, Gap{Type: GapConstraints, Priority: 6})
+	constraintsEmpty := len(d.charter.Constraints.Performance) == 0 && len(d.charter.Constraints.Security) == 0 && len(d.charter.Constraints.Compatibility) == 0 && len(d.charter.Constraints.Style) == 0 && len(d.charter.Constraints.Dependencies) == 0
+	if constraintsEmpty || !d.resumeMode {
+		gaps = append(gaps, Gap{Type: GapConstraints, Priority: 6})
+	} else if d.resumeMode {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Constraints already set — skipping"))
+	}
 	if len(d.charter.Unknowns) == 0 {
 		gaps = append(gaps, Gap{Type: GapUnknowns, Priority: 7})
+	} else if d.resumeMode {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Unknowns already set — skipping"))
 	}
-	gaps = append(gaps, Gap{Type: GapRisk, Priority: 8})
+	if d.charter.Risk == "" || !d.resumeMode {
+		gaps = append(gaps, Gap{Type: GapRisk, Priority: 8})
+	} else if d.resumeMode {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Risk already assessed — skipping"))
+	}
 
 	shouldAskRollback := d.charter.Risk == charter.RiskHigh || d.charter.Risk == charter.RiskCritical ||
 		d.cfg.Dialogue.AskForRollback == "high" || d.cfg.Dialogue.AskForRollback == "medium" ||
 		d.cfg.Dialogue.AskForRollback == "all"
 	if shouldAskRollback && d.charter.RollbackPlan == "" {
 		gaps = append(gaps, Gap{Type: GapRollback, Priority: 9})
+	} else if d.resumeMode && d.charter.RollbackPlan != "" {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Rollback plan already set — skipping"))
 	}
 
 	gaps = append(gaps, Gap{Type: GapSynthesize, Priority: 10})
@@ -206,62 +329,69 @@ func (d *Dialogue) generateQuestion(ctx context.Context, gap Gap) (string, error
 
 	switch gap.Type {
 	case GapGoal, GapContext:
-		resp, err := d.router.Complete(ctx, models.Mid, models.CompletionRequest{
+		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Thinking..."))
+		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   KickoffPrompt,
 			Messages: []models.Message{{Role: "user", Content: d.sourceSummary()}},
 		})
 		if err != nil {
 			return "", fmt.Errorf("kickoff LLM call: %w", err)
 		}
-		return resp.Content, nil
+		return resp, nil
 
 	case GapNonGoals:
-		resp, err := d.router.Complete(ctx, models.Mid, models.CompletionRequest{
+		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Generating non-goals..."))
+		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   AskNonGoalsPrompt,
 			Messages: []models.Message{{Role: "user", Content: charterSummary}},
 		})
 		if err != nil {
 			return "", fmt.Errorf("non-goals LLM call: %w", err)
 		}
-		return resp.Content, nil
+		return resp, nil
 
 	case GapAcceptance:
+		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Creating acceptance criteria..."))
 		return d.askAcceptanceCriteria(ctx, charterSummary)
 
 	case GapEdgeCases:
-		resp, err := d.router.Complete(ctx, models.Mid, models.CompletionRequest{
+		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Identifying edge cases..."))
+		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   AskEdgeCasesPrompt,
 			Messages: []models.Message{{Role: "user", Content: charterSummary}},
 		})
 		if err != nil {
 			return "", fmt.Errorf("edge cases LLM call: %w", err)
 		}
-		return resp.Content, nil
+		return resp, nil
 
 	case GapBlastRadius:
-		resp, err := d.router.Complete(ctx, models.Mid, models.CompletionRequest{
+		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Analyzing blast radius..."))
+		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   AskBlastRadiusPrompt,
 			Messages: []models.Message{{Role: "user", Content: charterSummary}},
 		})
 		if err != nil {
 			return "", fmt.Errorf("blast radius LLM call: %w", err)
 		}
-		return resp.Content, nil
+		return resp, nil
 
 	case GapConstraints:
-		resp, err := d.router.Complete(ctx, models.Mid, models.CompletionRequest{
+		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Inferring constraints..."))
+		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   AskConstraintsPrompt,
 			Messages: []models.Message{{Role: "user", Content: charterSummary}},
 		})
 		if err != nil {
 			return "", fmt.Errorf("constraints LLM call: %w", err)
 		}
-		return resp.Content, nil
+		return resp, nil
 
 	case GapUnknowns:
 		return "Are there any open questions or unknowns that could block this work? List anything you're not sure about, and whether it's blocking or can be resolved later.", nil
 
 	case GapRisk:
+		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Assessing risk level..."))
 		return d.askRisk(ctx, charterSummary)
 
 	case GapRollback:
@@ -275,12 +405,24 @@ func (d *Dialogue) generateQuestion(ctx context.Context, gap Gap) (string, error
 	}
 }
 
-func (d *Dialogue) askUser(ctx context.Context, question string) (string, error) {
-	d.transcript = append(d.transcript, charter.TranscriptTurn{
-		Role:    "tool",
-		At:      time.Now().UTC(),
-		Content: question,
-	})
+func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (string, error) {
+	fmt.Fprintf(d.output, "\n")
+	resp, err := d.routingStreamer.Stream(ctx, tier, req, d.output)
+	fmt.Fprintf(d.output, "\n\n")
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
+}
+
+func (d *Dialogue) askUser(ctx context.Context, gap Gap, question string) (string, error) {
+	if question != "" {
+		d.transcript = append(d.transcript, charter.TranscriptTurn{
+			Role:    "tool",
+			At:      time.Now().UTC(),
+			Content: question,
+		})
+	}
 
 	if d.nonInteractive {
 		return "", nil
@@ -301,9 +443,11 @@ func (d *Dialogue) askUser(ctx context.Context, question string) (string, error)
 		}
 	}
 
+	fmt.Fprintf(d.output, "%s\n\n", styleAccent.Render("Your response:"))
+
 	var answer string
 	field := huh.NewText().
-		Title(question).
+		Title("Your response:").
 		Value(&answer).
 		CharLimit(4000)
 
@@ -396,10 +540,12 @@ func (d *Dialogue) charterSummary() string {
 
 func (d *Dialogue) synthesize(ctx context.Context) error {
 	summary := d.charterSummary()
-	resp, err := d.router.Complete(ctx, models.Mid, models.CompletionRequest{
+	fmt.Fprintf(d.output, "\n")
+	resp, err := d.routingStreamer.Stream(ctx, models.Mid, models.CompletionRequest{
 		System:   SynthesizePrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
-	})
+	}, d.output)
+	fmt.Fprintf(d.output, "\n")
 	if err != nil {
 		return fmt.Errorf("synthesis: %w", err)
 	}
@@ -410,10 +556,12 @@ func (d *Dialogue) synthesize(ctx context.Context) error {
 
 func (d *Dialogue) counterspec(ctx context.Context) error {
 	summary := d.charterSummary()
-	resp, err := d.router.Complete(ctx, models.Frontier, models.CompletionRequest{
+	fmt.Fprintf(d.output, "\n")
+	resp, err := d.routingStreamer.Stream(ctx, models.Frontier, models.CompletionRequest{
 		System:   CounterSpecPrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
-	})
+	}, d.output)
+	fmt.Fprintf(d.output, "\n\n")
 	if err != nil {
 		return fmt.Errorf("counter-spec: %w", err)
 	}
@@ -429,8 +577,9 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 	var kept []string
 	for _, m := range cs.Misinterpretations {
 		keep := false
+		fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render(fmt.Sprintf("Misinterpretation: %s", m)))
 		confirm := huh.NewConfirm().
-			Title(fmt.Sprintf("Misinterpretation: %s\nKeep this in the charter?", m)).
+			Title("Keep this in the charter?").
 			Value(&keep)
 		if err := huh.NewForm(huh.NewGroup(confirm)).Run(); err != nil {
 			slog.Warn("counter-spec confirm failed", "error", err)
@@ -449,24 +598,13 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 func (d *Dialogue) enhanceFromSynthesis(synthesis string) {
 }
 
-func parseCounterSpec(content string) charter.CounterSpec {
-	var cs charter.CounterSpec
-	lines := strings.Split(content, "\n")
-	var inAmbiguity bool
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "MISINTERPRETATION") {
-			inAmbiguity = false
-			after := strings.SplitN(line, ":", 2)
-			if len(after) > 1 {
-				cs.Misinterpretations = append(cs.Misinterpretations, strings.TrimSpace(after[1]))
-			}
-		} else if strings.HasPrefix(line, "AMBIGUITIES") {
-			inAmbiguity = true
-		} else if inAmbiguity && strings.HasPrefix(line, "-") {
-			cs.AmbiguitiesFlagged = append(cs.AmbiguitiesFlagged, strings.TrimPrefix(line, "- "))
-		}
+func (d *Dialogue) persistTranscript() {
+	if d.chartersDir == "" {
+		return
 	}
-	return cs
+	d.charter.Transcript = d.transcript
+	d.charter.UpdatedAt = time.Now().UTC()
+	if err := d.charter.Save(d.chartersDir); err != nil {
+		slog.Warn("failed to persist transcript", "error", err)
+	}
 }
-

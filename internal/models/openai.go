@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -65,6 +66,63 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 		Usage: Usage{
 			InputTokens:  int(completion.Usage.PromptTokens),
 			OutputTokens: int(completion.Usage.CompletionTokens),
+		},
+	}, nil
+}
+
+func (c *OpenAIClient) Stream(ctx context.Context, req CompletionRequest, w io.Writer) (*CompletionResponse, error) {
+	var messages []openai.ChatCompletionMessageParamUnion
+	if req.System != "" {
+		messages = append(messages, openai.SystemMessage(req.System))
+	}
+	for _, m := range req.Messages {
+		switch m.Role {
+		case "user":
+			messages = append(messages, openai.UserMessage(m.Content))
+		case "assistant":
+			messages = append(messages, openai.AssistantMessage(m.Content))
+		}
+	}
+
+	params := openai.ChatCompletionNewParams{
+		Model:    req.Model,
+		Messages: messages,
+	}
+
+	if req.MaxTokens > 0 {
+		params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
+	}
+
+	stream := c.client.Chat.Completions.NewStreaming(ctx, params)
+	acc := openai.ChatCompletionAccumulator{}
+
+	for stream.Next() {
+		chunk := stream.Current()
+		acc.AddChunk(chunk)
+
+		if len(chunk.Choices) > 0 {
+			delta := chunk.Choices[0].Delta
+			if delta.Content != "" {
+				fmt.Fprint(w, delta.Content)
+			}
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("openai stream: %w", err)
+	}
+
+	result := acc.ChatCompletion
+	if len(result.Choices) == 0 {
+		return nil, fmt.Errorf("openai stream: no choices returned")
+	}
+
+	return &CompletionResponse{
+		Content: result.Choices[0].Message.Content,
+		Model:   string(result.Model),
+		Usage: Usage{
+			InputTokens:  int(result.Usage.PromptTokens),
+			OutputTokens: int(result.Usage.CompletionTokens),
 		},
 	}, nil
 }

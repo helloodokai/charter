@@ -11,4 +11,4 @@ bin/
 .charter.toml
 .charters/
 .env
-vendor/
+vendor/charter

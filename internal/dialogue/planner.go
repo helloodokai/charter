@@ -19,7 +19,7 @@ Format each as:
 Charter:
 ` + charterSummary
 
-	resp, err := d.router.Complete(ctx, models.Mid, models.CompletionRequest{
+	resp, err := d.routingStreamer.Complete(ctx, models.Mid, models.CompletionRequest{
 		System: "You are a test engineer writing acceptance criteria for a coding agent.",
 		Messages: []models.Message{{Role: "user", Content: prompt}},
 	})
@@ -42,7 +42,7 @@ Rate: low, medium, high, or critical.
 Charter:
 ` + charterSummary
 
-	resp, err := d.router.Complete(ctx, models.Cheap, models.CompletionRequest{
+	resp, err := d.routingStreamer.Complete(ctx, models.Cheap, models.CompletionRequest{
 		System: "You are a risk assessor for software changes. Be conservative.",
 		Messages: []models.Message{{Role: "user", Content: prompt}},
 	})

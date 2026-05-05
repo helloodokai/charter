@@ -11,7 +11,7 @@ import (
 
 func (d *Dialogue) RunCounterSpec(ctx context.Context) (*charter.CounterSpec, error) {
 	summary := d.charterSummary()
-	resp, err := d.router.Complete(ctx, models.Frontier, models.CompletionRequest{
+	resp, err := d.routingStreamer.Complete(ctx, models.Frontier, models.CompletionRequest{
 		System:   CounterSpecPrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
 	})
