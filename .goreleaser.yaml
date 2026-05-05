@@ -1,0 +1,89 @@
+version: 2
+
+project_name: charter
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: charter
+    main: ./cmd/charter
+    binary: charter
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+  - id: charter-app
+    main: ./cmd/charter-app
+    binary: charter-app
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: charter
+    builds:
+      - charter
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+  - id: charter-app
+    builds:
+      - charter-app
+    name_template: >-
+      {{ .ProjectName }}-app_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- .Arch }}
+
+brews:
+  - name: charter
+    ids:
+      - charter
+    tap:
+      owner: helloodokai
+      name: homebrew-tap
+    folder: Formula
+    homepage: https://github.com/helloodokai/charter
+    description: "Turn fuzzy intent into hardened, machine-readable specifications"
+    install: |
+      bin.install "charter"
+    test: |
+      system "#{bin}/charter", "--help"
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"

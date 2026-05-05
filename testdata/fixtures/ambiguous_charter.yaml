@@ -1,0 +1,25 @@
+schema_version: "1"
+id: ch-2026-05-04-ambig001
+created_at: 2026-05-04T12:00:00Z
+updated_at: 2026-05-04T12:08:00Z
+authors:
+  - tester
+source:
+  type: stdin
+  raw: "Make it faster"
+goal: Improve performance
+context: The system is slow sometimes.
+non_goals: []
+acceptance_criteria:
+  - id: ac-1
+    statement: Make it fast
+    verification: test
+edge_cases:
+  - What if it's already fast enough?
+constraints: {}
+blast_radius:
+  files: []
+  services: []
+  data: []
+risk: low
+status: draft

@@ -1,0 +1,42 @@
+name: Charter
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  draft-charter:
+    if: contains(github.event.label.name, 'needs-charter')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Install charter
+        run: go install ./cmd/charter
+      - name: Draft charter
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          charter draft \
+            --issue "${{ github.event.issue.html_url }}" \
+            --non-interactive \
+            --turn-budget 8
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: "Add charter for #${{ github.event.issue.number }}"
+          body: |
+            Auto-generated charter for issue #${{ github.event.issue.number }}
+
+            Review each section and confirm or revise before merging.
+          branch: charter/${{ github.event.issue.number }}
+          commit-message: "chore: add charter for issue #${{ github.event.issue.number }}"
+          add-paths: |
+            .charters/

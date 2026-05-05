@@ -1,0 +1,63 @@
+schema_version: "1"
+id: ch-2026-05-04-fix001
+created_at: 2026-05-04T12:00:00Z
+updated_at: 2026-05-04T12:08:00Z
+authors:
+  - tester
+source:
+  type: stdin
+  raw: "Fix the login bug"
+goal: Fix the login bug where users cannot authenticate after password reset
+context: |
+  Users are reporting that after resetting their password, they cannot log in
+  with the new password. The reset token flow appears to invalidate the session
+  before the new password is committed.
+non_goals:
+  - This charter does NOT redesign the password reset flow
+  - This charter does NOT change the auth provider configuration
+acceptance_criteria:
+  - id: ac-1
+    statement: Users can log in immediately after password reset
+    verification: test
+    test_hint: "Test the full reset-then-login flow"
+  - id: ac-2
+    statement: Existing sessions are not invalidated by the reset
+    verification: test
+  - id: ac-3
+    statement: Error message is clear when reset token is expired
+    verification: manual
+edge_cases:
+  - What if the user clicks the reset link twice?
+  - What if the reset token expires while the user is on the form?
+  - What if two password resets happen simultaneously?
+constraints:
+  performance:
+    - p99 login latency must stay under 200ms
+  security:
+    - Reset tokens must expire after 1 hour
+    - No password logging
+  compatibility:
+    - Must not break existing login API contract
+blast_radius:
+  files:
+    - src/auth/**
+    - internal/api/login.go
+  services:
+    - auth-service
+  data:
+    - users_table
+    - reset_tokens
+verification_plan:
+  - Run the existing auth integration tests
+  - Add a new integration test for the reset-then-login flow
+  - Manual verification of the error message
+rollback_plan: Revert the session handling change and redeploy auth-service
+counter_spec:
+  misinterpretations:
+    - "An agent might invalidate all sessions on any password change, not just the reset flow"
+    - "An agent might add rate limiting to the reset endpoint, which is out of scope"
+  ambiguities_flagged:
+    - "Does 'fix' mean repair existing flow or replace it?"
+risk: high
+risk_rationale: Touches authentication flow which is a critical path
+status: ready
