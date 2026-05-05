@@ -30,10 +30,13 @@ cd charter && make build && cp dist/charter /usr/local/bin/
 
 ## Quick start
 
-Draft your first charter — just describe what you want to build:
+Set up your repo and draft your first charter:
 
 ```bash
-# Set your Ollama Cloud API key
+# Initialize Charter in your repo
+charter init
+
+# Set your API key
 export OLLAMA_API_KEY=your-key-here
 
 # Just run it — you'll be prompted for your goal
@@ -47,9 +50,6 @@ charter draft --issue https://github.com/your-org/your-repo/issues/42
 
 # Or from a file
 charter draft --from requirements.md
-
-# Or pipe from stdin
-echo "Add a rate limiter to the API" | charter draft --stdin
 ```
 
 CHARTER runs an **interactive Socratic dialogue** — it asks you one question at a time, proposes answers based on context, and progressively hardens the spec until it's tight enough to hand to a coding agent.
@@ -114,6 +114,7 @@ charter doctor
 ## CLI reference
 
 ```
+charter init
 charter draft [goal] [--issue URL] [--from FILE] [--stdin] [--out PATH] [--non-interactive] [--turn-budget N] [--profile cloud|local] [--resume ID]
 charter validate <charter.yaml>
 charter conformance <charter.yaml> --diff REF..REF [--format json|md|both] [--out PATH]
@@ -123,6 +124,10 @@ charter schema
 charter doctor
 charter app serve [--addr :8080]
 ```
+
+### `charter init`
+
+Initialize a repo for Charter. Creates `.charter.toml` with sensible defaults and a `.charters/` directory. Safe to re-run — won't overwrite an existing config.
 
 ### `charter draft`
 

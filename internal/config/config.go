@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -169,4 +170,73 @@ func (c *Config) GetProfile(name string) (ProfileConfig, error) {
 
 func (c *Config) ChartersDir(repoRoot string) string {
 	return filepath.Join(repoRoot, c.Storage.ChartersDir)
+}
+
+func MarshalTOML(c *Config) ([]byte, error) {
+	var buf strings.Builder
+
+	buf.WriteString("# Charter configuration\n")
+	buf.WriteString("# See https://github.com/helloodokai/charter for full docs\n")
+	buf.WriteString("\n")
+
+	buf.WriteString("[dialogue]\n")
+	buf.WriteString(fmt.Sprintf("turn_budget         = %d\n", c.Dialogue.TurnBudget))
+	buf.WriteString(fmt.Sprintf("ask_for_rollback_at = %q\n", c.Dialogue.AskForRollback))
+	buf.WriteString(fmt.Sprintf("require_counter_spec = %v\n", c.Dialogue.RequireCounterSpec))
+	buf.WriteString("\n")
+
+	buf.WriteString("[storage]\n")
+	buf.WriteString(fmt.Sprintf("charters_dir = %q\n", c.Storage.ChartersDir))
+	buf.WriteString("\n")
+
+	buf.WriteString("[models]\n")
+	buf.WriteString(fmt.Sprintf("default_profile    = %q\n", c.Models.DefaultProfile))
+	buf.WriteString(fmt.Sprintf("fallback_to_local  = %v\n", c.Models.FallbackToLocal))
+	buf.WriteString("\n")
+
+	writeProfile := func(name string, p ProfileConfig) {
+		buf.WriteString(fmt.Sprintf("[models.profiles.%s]\n", name))
+		buf.WriteString(fmt.Sprintf("cheap    = { provider = %q, name = %q }\n", p.Cheap.Provider, p.Cheap.Name))
+		buf.WriteString(fmt.Sprintf("mid      = { provider = %q, name = %q }\n", p.Mid.Provider, p.Mid.Name))
+		buf.WriteString(fmt.Sprintf("frontier = { provider = %q, name = %q }\n", p.Frontier.Provider, p.Frontier.Name))
+		buf.WriteString("\n")
+	}
+	writeProfile("cloud", c.Models.Profiles["cloud"])
+	writeProfile("local", c.Models.Profiles["local"])
+
+	buf.WriteString("[models.ollama_cloud]\n")
+	buf.WriteString(fmt.Sprintf("host     = %q\n", c.Models.OllamaCloud.Host))
+	buf.WriteString("api_key  = \"${OLLAMA_API_KEY}\"\n")
+	buf.WriteString("\n")
+
+	buf.WriteString("[models.ollama_local]\n")
+	buf.WriteString(fmt.Sprintf("host     = %q\n", c.Models.OllamaLocal.Host))
+	buf.WriteString("\n")
+
+	buf.WriteString("[models.anthropic]\n")
+	buf.WriteString("api_key = \"${ANTHROPIC_API_KEY}\"\n")
+	buf.WriteString("\n")
+
+	buf.WriteString("[models.openai]\n")
+	buf.WriteString("api_key = \"${OPENAI_API_KEY}\"\n")
+	buf.WriteString("\n")
+
+	buf.WriteString("[github]\n")
+	buf.WriteString(fmt.Sprintf("app_id_env       = %q\n", c.GitHub.AppIDEnv))
+	buf.WriteString(fmt.Sprintf("private_key_env  = %q\n", c.GitHub.PrivateKeyEnv))
+	buf.WriteString(fmt.Sprintf("needs_label      = %q\n", c.GitHub.NeedsLabel))
+	buf.WriteString(fmt.Sprintf("has_label        = %q\n", c.GitHub.HasLabel))
+	buf.WriteString("\n")
+
+	buf.WriteString("[paths]\n")
+	buf.WriteString("critical = [")
+	for i, p := range c.Paths.Critical {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
+		buf.WriteString(fmt.Sprintf("%q", p))
+	}
+	buf.WriteString("]\n")
+
+	return []byte(buf.String()), nil
 }
