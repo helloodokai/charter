@@ -5,23 +5,16 @@ Set Height 800
 Set PlaybackSpeed 0.7
 Set Theme "Catppuccin Mocha"
 
-Type "cd /tmp/demo-repo && export PATH=/Users/lewis/Code/labs/charter/dist:/Users/lewis/Code/labs/acig/dist:$PATH"
+Hide
+Type "cp /Users/lewis/Code/labs/charter/dist/charter /usr/local/bin/ 2>/dev/null"
+Enter
+Type "cp /Users/lewis/Code/labs/acig/dist/acig /usr/local/bin/ 2>/dev/null"
+Enter
+Show
+
+Type "cd /tmp/demo-repo"
 Enter
 Sleep 500ms
-
-Type ""
-Enter
-Sleep 300ms
-
-Type "echo '  ╔════════════════════════════════════════════════╗'"
-Enter
-Sleep 100ms
-Type "echo '  ║   Charter — From Intent to Hardened Spec         ║'"
-Enter
-Sleep 100ms
-Type "echo '  ╚════════════════════════════════════════════════╝'"
-Enter
-Sleep 3s
 
 Type ""
 Enter
@@ -71,7 +64,7 @@ Sleep 2s
 Type "echo '📋 Step 2: Validate the completed charter'"
 Enter
 Sleep 500ms
-Type "echo 'After detailing non-goals, blast radius, constraints...'"`
+Type "echo 'After detailing non-goals, blast radius, constraints...'"
 Enter
 Sleep 1s
 Type "charter validate .charters/ch-2026-05-05-rate010.yaml"
