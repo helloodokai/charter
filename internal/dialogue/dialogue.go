@@ -2,6 +2,7 @@ package dialogue
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -589,32 +590,52 @@ func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req mod
 func (d *Dialogue) guardResponse(content string) string {
 	lower := strings.ToLower(content)
 	forbiddenPatterns := []string{
-		"```",                    // code blocks
-		"here's how",          // tutorials
-		"for example",         // examples
-		"step 1",              // step-by-step
-		"# step",              // steps
-		"## ",                 // markdown headings (tutorials use these)
+		"```",                         // code blocks
+		"here's how",                 // tutorials
+		"how to",                     // tutorials
+		"for example",                // examples
+		"step 1",                     // step-by-step
+		"# step",                     // steps
+		"## ",                        // markdown headings (tutorials)
+		"you need to",                // instruction
+		"you should",                 // instruction
+		"you'll need",                // instruction
+		"let me show",                // tutorial
+		"let's outline",              // tutorial
+		"create a new file",          // implementation
+		"add the following",          // implementation
+		"copy the template",          // implementation
+		"git add",                    // implementation
+		"git commit",                 // implementation
+		"npm install",               // implementation
+		"pip install",               // implementation
+		"actions/checkout",           // GitHub Actions implementation
+		"runs-on:",                   // GitHub Actions YAML
+		"steps:",                     // GitHub Actions YAML
+		"uses: actions/",             // GitHub Actions
 	}
 	for _, p := range forbiddenPatterns {
 		if strings.Contains(lower, p) {
 			slog.Warn("LLM generated implementation content", "pattern", p, "truncating", true)
-			// Truncate at the start of the implementation content
 			idx := strings.Index(lower, p)
 			if idx > 0 {
 				return strings.TrimSpace(content[:idx])
 			}
+			return "[response removed — contained implementation advice]"
 		}
 	}
 
 	// If response is very long, it's likely a tutorial
-	if len(content) > 1200 {
-		// Try to find the last question mark before the cutoff
-		lastQ := strings.LastIndex(content[:1200], "?")
+	if len(content) > 800 {
+		lastQ := strings.LastIndex(content[:800], "?")
 		if lastQ > 0 {
 			return strings.TrimSpace(content[:lastQ+1])
 		}
-		return content[:1200] + "\n[response truncated — LLM generated too much content]"
+		lastNewline := strings.LastIndex(content[:800], "\n")
+		if lastNewline > 100 {
+			return strings.TrimSpace(content[:lastNewline]) + "\n[response truncated]"
+		}
+		return content[:800] + "\n[response truncated]"
 	}
 
 	return content
@@ -658,6 +679,27 @@ func (d *Dialogue) charterSummary() string {
 			fmt.Fprintf(bPtr, "- %s\n", ec)
 		}
 	}
+	if len(d.charter.BlastRadius.Files) > 0 || len(d.charter.BlastRadius.Services) > 0 || len(d.charter.BlastRadius.Data) > 0 {
+		b.WriteString("Blast radius:\n")
+		if len(d.charter.BlastRadius.Files) > 0 {
+			fmt.Fprintf(bPtr, "  Files: %s\n", strings.Join(d.charter.BlastRadius.Files, ", "))
+		}
+		if len(d.charter.BlastRadius.Services) > 0 {
+			fmt.Fprintf(bPtr, "  Services: %s\n", strings.Join(d.charter.BlastRadius.Services, ", "))
+		}
+		if len(d.charter.BlastRadius.Data) > 0 {
+			fmt.Fprintf(bPtr, "  Data: %s\n", strings.Join(d.charter.BlastRadius.Data, ", "))
+		}
+	}
+	if d.charter.Risk != "" {
+		fmt.Fprintf(bPtr, "Risk: %s\n", d.charter.Risk)
+	}
+	if d.charter.RiskRationale != "" {
+		fmt.Fprintf(bPtr, "Risk rationale: %s\n", d.charter.RiskRationale)
+	}
+	if d.charter.RollbackPlan != "" {
+		fmt.Fprintf(bPtr, "Rollback: %s\n", d.charter.RollbackPlan)
+	}
 	if b.Len() == 0 {
 		return "No charter content yet."
 	}
@@ -666,33 +708,41 @@ func (d *Dialogue) charterSummary() string {
 
 func (d *Dialogue) synthesize(ctx context.Context) error {
 	summary := d.charterSummary()
-	fmt.Fprintf(d.output, "\n")
-	resp, err := d.routingStreamer.Stream(ctx, models.Mid, models.CompletionRequest{
+	var buf bytes.Buffer
+	_, err := d.routingStreamer.Stream(ctx, models.Mid, models.CompletionRequest{
 		System:   SynthesizePrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
-	}, d.output)
-	fmt.Fprintf(d.output, "\n")
+	}, &buf)
 	if err != nil {
 		return fmt.Errorf("synthesis: %w", err)
 	}
 
-	d.enhanceFromSynthesis(resp.Content)
+	cleaned := d.guardResponse(buf.String())
+	fmt.Fprintf(d.output, "\n%s\n", cleaned)
+	if len(cleaned) < len(buf.String())-10 {
+		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Synthesis contained implementation content and was cleaned"))
+	}
+
+	d.enhanceFromSynthesis(cleaned)
 	return nil
 }
 
 func (d *Dialogue) counterspec(ctx context.Context) error {
 	summary := d.charterSummary()
-	fmt.Fprintf(d.output, "\n")
-	resp, err := d.routingStreamer.Stream(ctx, models.Frontier, models.CompletionRequest{
+	var buf bytes.Buffer
+	_, err := d.routingStreamer.Stream(ctx, models.Frontier, models.CompletionRequest{
 		System:   CounterSpecPrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
-	}, d.output)
-	fmt.Fprintf(d.output, "\n\n")
+	}, &buf)
 	if err != nil {
 		return fmt.Errorf("counter-spec: %w", err)
 	}
 
-	content := resp.Content
+	content := d.guardResponse(buf.String())
+	fmt.Fprintf(d.output, "\n%s\n", content)
+	if len(content) < len(buf.String())-10 {
+		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Counter-spec contained implementation content and was cleaned"))
+	}
 
 	if d.nonInteractive {
 		d.charter.CounterSpec = parseCounterSpec(content)
