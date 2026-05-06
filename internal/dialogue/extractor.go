@@ -1,14 +1,13 @@
 package dialogue
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/helloodokai/charter/internal/charter"
 )
 
-func (d *Dialogue) extractGoalAndContext(ctx context.Context, answer string) error {
+func (d *Dialogue) extractGoalAndContext(answer string) error {
 	goal, context, err := parseGoalContext(answer)
 	if err != nil {
 		return err
@@ -22,33 +21,26 @@ func (d *Dialogue) extractGoalAndContext(ctx context.Context, answer string) err
 	return nil
 }
 
-func (d *Dialogue) extractNonGoals(ctx context.Context, answer string) error {
-	items, err := parseList(answer)
-	if err != nil {
-		return err
+func (d *Dialogue) extractNonGoals(answer string) error {
+	lines := splitLines(answer)
+	if len(lines) == 0 {
+		lines = []string{answer}
 	}
-	if len(items) == 0 {
-		items = parseNonStructuredList(answer)
-	}
-	d.charter.NonGoals = append(d.charter.NonGoals, items...)
+	d.charter.NonGoals = append(d.charter.NonGoals, lines...)
 	return nil
 }
 
-func (d *Dialogue) extractAcceptanceCriteria(ctx context.Context, answer string) error {
-	lines := strings.Split(answer, "\n")
+func (d *Dialogue) extractAcceptanceCriteria(answer string) error {
+	lines := splitLines(answer)
+	if len(lines) == 0 {
+		d.charter.AcceptanceCriteria = append(d.charter.AcceptanceCriteria, charter.AcceptanceCriterion{
+			ID:           fmt.Sprintf("ac-%d", len(d.charter.AcceptanceCriteria)+1),
+			Statement:    strings.TrimSpace(answer),
+			Verification: "manual",
+		})
+		return nil
+	}
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "?") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "- ")
-		line = strings.TrimPrefix(line, "* ")
-		line = strings.TrimPrefix(line, "• ")
-
-		if line == "" {
-			continue
-		}
-
 		verification := "test"
 		lower := strings.ToLower(line)
 		if strings.Contains(lower, "manual") {
@@ -56,67 +48,66 @@ func (d *Dialogue) extractAcceptanceCriteria(ctx context.Context, answer string)
 		} else if strings.Contains(lower, "metric") {
 			verification = "metric"
 		}
-
-		statement := line
-		if idx := strings.LastIndex(line, "("); idx > 0 {
-			statement = strings.TrimSpace(line[:idx])
-		}
-
-		statement = strings.TrimSuffix(statement, ".")
-		verification = strings.TrimPrefix(verification, "(")
-		verification = strings.TrimSuffix(verification, ")")
-
-		if statement == "" {
-			continue
-		}
-
-		id := fmt.Sprintf("ac-%d", len(d.charter.AcceptanceCriteria)+1)
 		d.charter.AcceptanceCriteria = append(d.charter.AcceptanceCriteria, charter.AcceptanceCriterion{
-			ID:           id,
-			Statement:    statement,
+			ID:           fmt.Sprintf("ac-%d", len(d.charter.AcceptanceCriteria)+1),
+			Statement:    line,
 			Verification: verification,
 		})
 	}
 	return nil
 }
 
-func (d *Dialogue) extractEdgeCases(ctx context.Context, answer string) error {
-	items := parseNonStructuredList(answer)
-	d.charter.EdgeCases = append(d.charter.EdgeCases, items...)
+func (d *Dialogue) extractEdgeCases(answer string) error {
+	lines := splitLines(answer)
+	if len(lines) == 0 {
+		lines = []string{answer}
+	}
+	d.charter.EdgeCases = append(d.charter.EdgeCases, lines...)
 	return nil
 }
 
-func (d *Dialogue) extractBlastRadius(ctx context.Context, answer string) error {
+func (d *Dialogue) extractBlastRadius(answer string) error {
 	br := parseBlastRadius(answer)
-	d.charter.BlastRadius.Files = append(d.charter.BlastRadius.Files, br.Files...)
-	d.charter.BlastRadius.Services = append(d.charter.BlastRadius.Services, br.Services...)
-	d.charter.BlastRadius.Data = append(d.charter.BlastRadius.Data, br.Data...)
+	if len(br.Files) == 0 && len(br.Services) == 0 && len(br.Data) == 0 {
+		d.charter.BlastRadius.Files = append(d.charter.BlastRadius.Files, splitLines(answer)...)
+	} else {
+		d.charter.BlastRadius.Files = append(d.charter.BlastRadius.Files, br.Files...)
+		d.charter.BlastRadius.Services = append(d.charter.BlastRadius.Services, br.Services...)
+		d.charter.BlastRadius.Data = append(d.charter.BlastRadius.Data, br.Data...)
+	}
 	return nil
 }
 
-func (d *Dialogue) extractConstraints(ctx context.Context, answer string) error {
+func (d *Dialogue) extractConstraints(answer string) error {
 	c := parseConstraints(answer)
-	if len(c.Performance) > 0 {
-		d.charter.Constraints.Performance = append(d.charter.Constraints.Performance, c.Performance...)
-	}
-	if len(c.Security) > 0 {
-		d.charter.Constraints.Security = append(d.charter.Constraints.Security, c.Security...)
-	}
-	if len(c.Compatibility) > 0 {
-		d.charter.Constraints.Compatibility = append(d.charter.Constraints.Compatibility, c.Compatibility...)
-	}
-	if len(c.Style) > 0 {
-		d.charter.Constraints.Style = append(d.charter.Constraints.Style, c.Style...)
-	}
-	if len(c.Dependencies) > 0 {
-		d.charter.Constraints.Dependencies = append(d.charter.Constraints.Dependencies, c.Dependencies...)
+	if len(c.Performance) == 0 && len(c.Security) == 0 && len(c.Compatibility) == 0 && len(c.Style) == 0 && len(c.Dependencies) == 0 {
+		d.charter.Constraints.Performance = append(d.charter.Constraints.Performance, splitLines(answer)...)
+	} else {
+		if len(c.Performance) > 0 {
+			d.charter.Constraints.Performance = append(d.charter.Constraints.Performance, c.Performance...)
+		}
+		if len(c.Security) > 0 {
+			d.charter.Constraints.Security = append(d.charter.Constraints.Security, c.Security...)
+		}
+		if len(c.Compatibility) > 0 {
+			d.charter.Constraints.Compatibility = append(d.charter.Constraints.Compatibility, c.Compatibility...)
+		}
+		if len(c.Style) > 0 {
+			d.charter.Constraints.Style = append(d.charter.Constraints.Style, c.Style...)
+		}
+		if len(c.Dependencies) > 0 {
+			d.charter.Constraints.Dependencies = append(d.charter.Constraints.Dependencies, c.Dependencies...)
+		}
 	}
 	return nil
 }
 
 func (d *Dialogue) extractUnknowns(answer string) error {
-	items := parseNonStructuredList(answer)
-	for _, item := range items {
+	lines := splitLines(answer)
+	if len(lines) == 0 {
+		lines = []string{answer}
+	}
+	for _, item := range lines {
 		d.charter.Unknowns = append(d.charter.Unknowns, charter.Unknown{
 			ID:       fmt.Sprintf("unk-%d", len(d.charter.Unknowns)+1),
 			Question: item,
@@ -126,7 +117,7 @@ func (d *Dialogue) extractUnknowns(answer string) error {
 	return nil
 }
 
-func (d *Dialogue) extractRisk(ctx context.Context, answer string) error {
+func (d *Dialogue) extractRisk(answer string) error {
 	lower := strings.ToLower(answer)
 	switch {
 	case strings.Contains(lower, "critical"):
@@ -146,6 +137,27 @@ func (d *Dialogue) extractRisk(ctx context.Context, answer string) error {
 		d.charter.RiskRationale = answer
 	}
 	return nil
+}
+
+func splitLines(text string) []string {
+	var items []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		line = strings.TrimPrefix(line, "- ")
+		line = strings.TrimPrefix(line, "* ")
+		line = strings.TrimPrefix(line, "• ")
+		if strings.HasPrefix(line, strings.SplitN(line, ".", 2)[0]+". ") {
+			line = strings.TrimPrefix(line, strings.SplitN(line, ".", 2)[0]+". ")
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			items = append(items, line)
+		}
+	}
+	return items
 }
 
 func parseGoalContext(text string) (string, string, error) {
@@ -171,45 +183,6 @@ func parseGoalContext(text string) (string, string, error) {
 		}
 	}
 	return goal, context, nil
-}
-
-func parseList(text string) ([]string, error) {
-	var items []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		line = strings.TrimPrefix(line, "- ")
-		line = strings.TrimPrefix(line, "* ")
-		line = strings.TrimPrefix(line, "• ")
-		line = strings.TrimPrefix(line, strings.SplitN(line, ".", 2)[0] + ". ")
-		if line != "" {
-			items = append(items, line)
-		}
-	}
-	return items, nil
-}
-
-func parseNonStructuredList(text string) []string {
-	var items []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		line = strings.TrimPrefix(line, "- ")
-		line = strings.TrimPrefix(line, "* ")
-		line = strings.TrimPrefix(line, "• ")
-		if strings.HasPrefix(line, strings.SplitN(line, ".", 2)[0]+". ") {
-			line = strings.TrimPrefix(line, strings.SplitN(line, ".", 2)[0]+". ")
-		}
-		line = strings.TrimSuffix(line, "?")
-		if len(line) > 10 {
-			items = append(items, line)
-		}
-	}
-	return items
 }
 
 func parseBlastRadius(text string) charter.BlastRadius {

@@ -279,7 +279,7 @@ func (d *Dialogue) runConversation(ctx context.Context) (*Result, error) {
 			break
 		}
 
-		if err := d.extractField(ctx, field, answer); err != nil {
+		if err := d.extractField(field, answer); err != nil {
 			slog.Warn("extraction had issues, keeping raw content", "field", field, "error", err)
 		}
 
@@ -502,28 +502,28 @@ func (d *Dialogue) askUser(ctx context.Context, question string) (string, error)
 	return answer, nil
 }
 
-func (d *Dialogue) extractField(ctx context.Context, field fieldName, answer string) error {
+func (d *Dialogue) extractField(field fieldName, answer string) error {
 	if answer == "" {
 		return nil
 	}
 
 	switch field {
 	case fieldGoal, fieldContext:
-		return d.extractGoalAndContext(ctx, answer)
+		return d.extractGoalAndContext(answer)
 	case fieldNonGoals:
-		return d.extractNonGoals(ctx, answer)
+		return d.extractNonGoals(answer)
 	case fieldAcceptance:
-		return d.extractAcceptanceCriteria(ctx, answer)
+		return d.extractAcceptanceCriteria(answer)
 	case fieldEdgeCases:
-		return d.extractEdgeCases(ctx, answer)
+		return d.extractEdgeCases(answer)
 	case fieldBlastRadius:
-		return d.extractBlastRadius(ctx, answer)
+		return d.extractBlastRadius(answer)
 	case fieldConstraints:
-		return d.extractConstraints(ctx, answer)
+		return d.extractConstraints(answer)
 	case fieldUnknowns:
 		return d.extractUnknowns(answer)
 	case fieldRisk:
-		return d.extractRisk(ctx, answer)
+		return d.extractRisk(answer)
 	case fieldRollback:
 		d.charter.RollbackPlan = answer
 		return nil

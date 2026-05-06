@@ -26,8 +26,8 @@ func TestParseGoalContextFallback(t *testing.T) {
 	require.Equal(t, "This is context.", ctx)
 }
 
-func TestParseNonStructuredList(t *testing.T) {
-	items := parseNonStructuredList("- First item with enough length\n- Second item with some length\n- Third item with adequate length")
+func TestSplitLines(t *testing.T) {
+	items := splitLines("- First item with enough length\n- Second item with some length\n- Third item with adequate length")
 	require.Len(t, items, 3)
 	require.Contains(t, items[0], "First item")
 }
