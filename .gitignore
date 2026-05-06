@@ -12,3 +12,7 @@ bin/
 .charters/
 .env
 vendor/charter
+
+# Charter
+.charters/*.yaml
+!.charters/index.yaml

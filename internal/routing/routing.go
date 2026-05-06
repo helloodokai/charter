@@ -125,12 +125,28 @@ func (r *Router) fallbackTierRef(tier models.Tier) config.ModelRef {
 func (r *Router) CheckReachable(ctx context.Context) map[string]error {
 	results := make(map[string]error)
 	for prov, client := range r.clients {
-		_, err := client.Complete(ctx, models.CompletionRequest{
-			Messages: []models.Message{{Role: "user", Content: "ping"}},
-			MaxTokens: 1,
-		})
-		if err != nil {
-			results[string(prov)] = err
+		ref := r.tierRef(models.Cheap)
+		if models.Provider(ref.Provider) == prov {
+			_, err := client.Complete(ctx, models.CompletionRequest{
+				Model:     ref.Name,
+				Messages:  []models.Message{{Role: "user", Content: "ping"}},
+				MaxTokens: 1,
+			})
+			if err != nil {
+				results[string(prov)] = err
+			}
+			continue
+		}
+		fbRef := r.fallbackTierRef(models.Cheap)
+		if models.Provider(fbRef.Provider) == prov {
+			_, err := client.Complete(ctx, models.CompletionRequest{
+				Model:     fbRef.Name,
+				Messages:  []models.Message{{Role: "user", Content: "ping"}},
+				MaxTokens: 1,
+			})
+			if err != nil {
+				results[string(prov)] = err
+			}
 		}
 	}
 	return results

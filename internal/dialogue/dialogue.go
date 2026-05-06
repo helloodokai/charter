@@ -408,23 +408,21 @@ func (d *Dialogue) filledFields() []string {
 func (d *Dialogue) generateFieldQuestion(ctx context.Context, field fieldName) (string, error) {
 	switch field {
 	case fieldGoal, fieldContext:
-		if d.charter.Goal == "" && d.charter.Context == "" {
-			fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Starting conversation..."))
-			resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
-				System:   KickoffPrompt,
-				Messages: []models.Message{{Role: "user", Content: d.sourceSummary()}},
-			})
-			if err != nil {
-				return "", fmt.Errorf("kickoff: %w", err)
-			}
-			return resp, nil
-		}
 		if field == fieldGoal && d.charter.Goal != "" {
 			return fmt.Sprintf("**Goal:** Your charter already has this goal: \"%s\"\n\nIs this correct, or would you like to refine it?", d.charter.Goal), nil
 		}
 		if field == fieldContext && d.charter.Context != "" {
 			return fmt.Sprintf("**Context:** You've described the context as: \"%s\"\n\nAnything to add or change?", d.charter.Context), nil
 		}
+		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Starting conversation..."))
+		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
+			System:   KickoffPrompt,
+			Messages: []models.Message{{Role: "user", Content: d.sourceSummary()}},
+		})
+		if err != nil {
+			return "", fmt.Errorf("kickoff: %w", err)
+		}
+		return resp, nil
 
 	case fieldNonGoals:
 		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Generating non-goals..."))
