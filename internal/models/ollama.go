@@ -72,10 +72,27 @@ type ollamaResponse struct {
 }
 
 func (c *OllamaClient) doRequest(ctx context.Context, req CompletionRequest, stream bool) (*http.Response, error) {
+	system := req.System
+	if req.WebSearch {
+		lastMsg := ""
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == "user" {
+				lastMsg = req.Messages[i].Content
+				break
+			}
+		}
+		if lastMsg != "" {
+			results, err := WebSearch(ctx, lastMsg)
+			if err == nil && results != "" {
+				system += "\n\nWeb search results:\n" + results
+			}
+		}
+	}
+
 	ollamaReq := ollamaRequest{
 		Model:  req.Model,
 		Stream: stream,
-		System: req.System,
+		System: system,
 		Options: ollamaOptions{
 			NumPredict: req.MaxTokens,
 		},

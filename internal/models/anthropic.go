@@ -63,6 +63,16 @@ func (c *AnthropicClient) Complete(ctx context.Context, req CompletionRequest) (
 		}
 	}
 
+	if req.WebSearch {
+		params.Tools = []anthropic.ToolUnionParam{
+			{
+				OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{
+					MaxUses: anthropic.Int(5),
+				},
+			},
+		}
+	}
+
 	msg, err := c.client.Messages.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request: %w", err)
@@ -115,6 +125,16 @@ func (c *AnthropicClient) Stream(ctx context.Context, req CompletionRequest, w i
 	if req.System != "" {
 		params.System = []anthropic.TextBlockParam{
 			{Text: req.System},
+		}
+	}
+
+	if req.WebSearch {
+		params.Tools = []anthropic.ToolUnionParam{
+			{
+				OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{
+					MaxUses: anthropic.Int(5),
+				},
+			},
 		}
 	}
 

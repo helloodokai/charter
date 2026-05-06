@@ -54,6 +54,12 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (*Co
 		params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
 	}
 
+	if req.WebSearch {
+		params.WebSearchOptions = openai.ChatCompletionNewParamsWebSearchOptions{
+			SearchContextSize: "medium",
+		}
+	}
+
 	completion, err := c.client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("openai request: %w", err)
@@ -95,6 +101,12 @@ func (c *OpenAIClient) Stream(ctx context.Context, req CompletionRequest, w io.W
 
 	if req.MaxTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
+	}
+
+	if req.WebSearch {
+		params.WebSearchOptions = openai.ChatCompletionNewParamsWebSearchOptions{
+			SearchContextSize: "medium",
+		}
 	}
 
 	stream := c.client.Chat.Completions.NewStreaming(ctx, params)

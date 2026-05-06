@@ -43,9 +43,10 @@ type ModelsConfig struct {
 
 // ProfileConfig maps each tier to a model reference for a routing profile.
 type ProfileConfig struct {
-	Cheap    ModelRef `toml:"cheap"`
-	Mid      ModelRef `toml:"mid"`
-	Frontier ModelRef `toml:"frontier"`
+	Cheap      ModelRef `toml:"cheap"`
+	Mid        ModelRef `toml:"mid"`
+	Frontier   ModelRef `toml:"frontier"`
+	WebSearch  bool     `toml:"web_search"`
 }
 
 // ModelRef references a specific model by provider and name.
@@ -99,14 +100,16 @@ func Default() *Config {
 			FallbackToLocal: true,
 			Profiles: map[string]ProfileConfig{
 				"cloud": {
-					Cheap:    ModelRef{Provider: "ollama_cloud", Name: "gpt-oss:20b"},
-					Mid:      ModelRef{Provider: "ollama_cloud", Name: "qwen3-coder:480b"},
-					Frontier: ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-6"},
+					Cheap:      ModelRef{Provider: "ollama_cloud", Name: "gpt-oss:20b"},
+					Mid:        ModelRef{Provider: "ollama_cloud", Name: "qwen3-coder:480b"},
+					Frontier:   ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-6"},
+					WebSearch:  true,
 				},
 				"local": {
-					Cheap:    ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
-					Mid:      ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
-					Frontier: ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
+					Cheap:     ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
+					Mid:       ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
+					Frontier:  ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
+					WebSearch: true,
 				},
 			},
 		OllamaCloud: OllamaConfig{ //nolint:gosec // false positive: env var template, not hardcoded credential
@@ -232,9 +235,10 @@ func MarshalTOML(c *Config) ([]byte, error) {
 
 	writeProfile := func(name string, p ProfileConfig) {
 		fmt.Fprintf(bufPtr, "[models.profiles.%s]\n", name)
-		fmt.Fprintf(bufPtr, "cheap    = { provider = %q, name = %q }\n", p.Cheap.Provider, p.Cheap.Name)
-		fmt.Fprintf(bufPtr, "mid      = { provider = %q, name = %q }\n", p.Mid.Provider, p.Mid.Name)
-		fmt.Fprintf(bufPtr, "frontier = { provider = %q, name = %q }\n", p.Frontier.Provider, p.Frontier.Name)
+		fmt.Fprintf(bufPtr, "cheap      = { provider = %q, name = %q }\n", p.Cheap.Provider, p.Cheap.Name)
+		fmt.Fprintf(bufPtr, "mid        = { provider = %q, name = %q }\n", p.Mid.Provider, p.Mid.Name)
+		fmt.Fprintf(bufPtr, "frontier   = { provider = %q, name = %q }\n", p.Frontier.Provider, p.Frontier.Name)
+		fmt.Fprintf(bufPtr, "web_search = %v\n", p.WebSearch)
 		buf.WriteString("\n")
 	}
 	writeProfile("cloud", c.Models.Profiles["cloud"])

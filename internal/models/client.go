@@ -27,6 +27,7 @@ type CompletionRequest struct {
 	Messages  []Message `json:"messages"`
 	System    string    `json:"system,omitempty"`
 	MaxTokens int       `json:"max_tokens,omitempty"`
+	WebSearch bool      `json:"web_search,omitempty"`
 }
 
 // CompletionResponse represents the result of an LLM completion call.

@@ -78,6 +78,9 @@ func (r *Router) completeWithRef(ctx context.Context, ref config.ModelRef, req m
 		return nil, fmt.Errorf("no client for provider %q", ref.Provider)
 	}
 	req.Model = ref.Name
+	if r.profile.WebSearch {
+		req.WebSearch = true
+	}
 	slog.Debug("routing completion", "provider", ref.Provider, "model", ref.Name, "tier", req.Model)
 	return client.Complete(ctx, req)
 }
@@ -88,6 +91,9 @@ func (r *Router) streamWithRef(ctx context.Context, ref config.ModelRef, req mod
 		return nil, fmt.Errorf("no client for provider %q", ref.Provider)
 	}
 	req.Model = ref.Name
+	if r.profile.WebSearch {
+		req.WebSearch = true
+	}
 	slog.Debug("routing stream", "provider", ref.Provider, "model", ref.Name)
 	return client.Stream(ctx, req, w)
 }
