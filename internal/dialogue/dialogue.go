@@ -417,80 +417,41 @@ func (d *Dialogue) filledFields() []string {
 
 func (d *Dialogue) generateFieldQuestion(ctx context.Context, field fieldName) (string, error) {
 	switch field {
-	case fieldGoal, fieldContext:
-		if field == fieldGoal && d.charter.Goal != "" {
-			return fmt.Sprintf("**Goal:** Your charter already has this goal: \"%s\"\n\nIs this correct, or would you like to refine it?", d.charter.Goal), nil
+	case fieldGoal:
+		if d.charter.Goal != "" {
+			return fmt.Sprintf("**Goal:** %s\n\nIs this correct, or would you like to refine it?", d.charter.Goal), nil
 		}
-		if field == fieldContext && d.charter.Context != "" {
-			return fmt.Sprintf("**Context:** You've described the context as: \"%s\"\n\nAnything to add or change?", d.charter.Context), nil
+		return "**Goal:** What specific outcome are you trying to achieve? Describe it in one sentence starting with a verb.", nil
+
+	case fieldContext:
+		if d.charter.Context != "" {
+			return fmt.Sprintf("**Context:** %s\n\nAnything to add or change?", d.charter.Context), nil
 		}
-		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Starting conversation..."))
-		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
-			System:   KickoffPrompt,
-			Messages: []models.Message{{Role: "user", Content: d.sourceSummary()}},
-		})
-		if err != nil {
-			return "", fmt.Errorf("kickoff: %w", err)
-		}
-		return resp, nil
+		return "**Context:** What background would a new team member need to understand why this work matters?", nil
 
 	case fieldNonGoals:
-		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Generating non-goals..."))
-		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
-			System:   AskNonGoalsPrompt,
-			Messages: []models.Message{{Role: "user", Content: d.charterSummary()}},
-		})
-		if err != nil {
-			return "", fmt.Errorf("non-goals: %w", err)
-		}
-		return resp, nil
+		return "**Non-Goals:** What is this work explicitly NOT going to do? What should an agent avoid building?", nil
 
 	case fieldAcceptance:
-		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Creating acceptance criteria..."))
-		return d.askAcceptanceCriteria(ctx, d.charterSummary())
+		return "**Acceptance Criteria:** How will you know this is done? List specific, testable conditions.", nil
 
 	case fieldEdgeCases:
-		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Identifying edge cases..."))
-		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
-			System:   AskEdgeCasesPrompt,
-			Messages: []models.Message{{Role: "user", Content: d.charterSummary()}},
-		})
-		if err != nil {
-			return "", fmt.Errorf("edge cases: %w", err)
-		}
-		return resp, nil
+		return "**Edge Cases:** What could break this? List boundary conditions, failures, and unusual scenarios.", nil
 
 	case fieldBlastRadius:
-		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Analyzing blast radius..."))
-		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
-			System:   AskBlastRadiusPrompt,
-			Messages: []models.Message{{Role: "user", Content: d.charterSummary()}},
-		})
-		if err != nil {
-			return "", fmt.Errorf("blast radius: %w", err)
-		}
-		return resp, nil
+		return "**Blast Radius:** What files, services, or data stores will this change touch?", nil
 
 	case fieldConstraints:
-		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Inferring constraints..."))
-		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
-			System:   AskConstraintsPrompt,
-			Messages: []models.Message{{Role: "user", Content: d.charterSummary()}},
-		})
-		if err != nil {
-			return "", fmt.Errorf("constraints: %w", err)
-		}
-		return resp, nil
+		return "**Constraints:** Are there performance, security, style, or compatibility limits an agent must respect?", nil
 
 	case fieldUnknowns:
-		return "**Unknowns:** Are there any open questions or unknowns that could block this work? List anything you're not sure about, and whether it's blocking or can be resolved later.", nil
+		return "**Unknowns:** Any open questions that could block this work? What are you not sure about?", nil
 
 	case fieldRisk:
-		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Assessing risk level..."))
-		return d.askRisk(ctx, d.charterSummary())
+		return "**Risk:** How risky is this change? (low / medium / high / critical)", nil
 
 	case fieldRollback:
-		return "**Rollback Plan:** This charter targets high-or-above risk. What's the rollback plan if something goes wrong? Describe how to safely revert.", nil
+		return "**Rollback Plan:** If something goes wrong, how do you safely revert?", nil
 	}
 
 	return "", fmt.Errorf("unknown field: %s", field)
@@ -568,13 +529,24 @@ func (d *Dialogue) extractField(ctx context.Context, field fieldName, answer str
 }
 
 func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (string, error) {
-	fmt.Fprintf(d.output, "\n")
-	resp, err := d.routingStreamer.Stream(ctx, tier, req, d.output)
-	fmt.Fprintf(d.output, "\n\n")
+	resp, err := d.routingStreamer.Stream(ctx, tier, req, io.Discard)
 	if err != nil {
 		return "", err
 	}
-	return d.guardResponse(resp.Content), nil
+
+	// Print a brief loading indicator
+	fmt.Fprintf(d.output, "  ")
+
+	cleaned := d.guardResponse(resp.Content)
+	fmt.Fprintf(d.output, "%s", cleaned)
+	fmt.Fprintf(d.output, "\n\n")
+
+	// Show truncation warning if content was stripped
+	if len(cleaned) < len(resp.Content)-10 {
+		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Response contained implementation content and was cleaned"))
+	}
+
+	return cleaned, nil
 }
 
 func (d *Dialogue) guardResponse(content string) string {
@@ -611,7 +583,7 @@ func (d *Dialogue) guardResponse(content string) string {
 	return content
 }
 
-func (d *Dialogue) sourceSummary() string {
+func (d *Dialogue) sourceSummary() string { //nolint:unused
 	s := d.charter.Source
 	if s.Raw != "" {
 		return s.Raw
@@ -715,7 +687,7 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 func (d *Dialogue) enhanceFromSynthesis(synthesis string) {
 }
 
-func (d *Dialogue) askAcceptanceCriteria(ctx context.Context, charterSummary string) (string, error) {
+func (d *Dialogue) askAcceptanceCriteria(ctx context.Context, charterSummary string) (string, error) { //nolint:unused
 	prompt := `Given the charter summary below, propose 3-5 acceptance criteria. Each should be:
 1. Testable — you can verify it passed or failed
 2. Specific — no vague words like "works" or "is good"
@@ -739,7 +711,7 @@ Charter:
 	return resp.Content + "\n\nDo you want to add, modify, or remove any of these criteria?", nil
 }
 
-func (d *Dialogue) askRisk(ctx context.Context, charterSummary string) (string, error) {
+func (d *Dialogue) askRisk(ctx context.Context, charterSummary string) (string, error) { //nolint:unused
 	prompt := `Based on the charter summary, assess the risk level. Consider:
 - How many files/services are touched?
 - Are any critical paths affected?

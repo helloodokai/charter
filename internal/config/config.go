@@ -104,9 +104,9 @@ func Default() *Config {
 					Frontier: ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-6"},
 				},
 				"local": {
-					Cheap:    ModelRef{Provider: "ollama_local", Name: "qwen2.5-coder:7b"},
-					Mid:      ModelRef{Provider: "ollama_local", Name: "qwen2.5-coder:32b"},
-					Frontier: ModelRef{Provider: "anthropic", Name: "claude-sonnet-4-6"},
+					Cheap:    ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
+					Mid:      ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
+					Frontier: ModelRef{Provider: "ollama_local", Name: "gemma3:12b"},
 				},
 			},
 		OllamaCloud: OllamaConfig{ //nolint:gosec // false positive: env var template, not hardcoded credential
