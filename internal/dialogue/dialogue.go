@@ -589,53 +589,72 @@ func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req mod
 
 func (d *Dialogue) guardResponse(content string) string {
 	lower := strings.ToLower(content)
-	forbiddenPatterns := []string{
-		"```",                         // code blocks
-		"here's how",                 // tutorials
-		"how to",                     // tutorials
-		"for example",                // examples
-		"step 1",                     // step-by-step
-		"# step",                     // steps
-		"## ",                        // markdown headings (tutorials)
-		"you need to",                // instruction
-		"you should",                 // instruction
-		"you'll need",                // instruction
-		"let me show",                // tutorial
-		"let's outline",              // tutorial
-		"create a new file",          // implementation
-		"add the following",          // implementation
-		"copy the template",          // implementation
-		"git add",                    // implementation
-		"git commit",                 // implementation
-		"npm install",               // implementation
-		"pip install",               // implementation
-		"actions/checkout",           // GitHub Actions implementation
-		"runs-on:",                   // GitHub Actions YAML
-		"steps:",                     // GitHub Actions YAML
-		"uses: actions/",             // GitHub Actions
+
+	// First check: does the output contain ANY valid charter format markers?
+	// If the LLM produced a valid charter, it should have GOAL: or CONTEXT: etc.
+	hasValidFormat := strings.Contains(lower, "goal:") ||
+		strings.Contains(lower, "context:") ||
+		strings.Contains(lower, "non_goal") ||
+		strings.Contains(lower, "acceptance_criterion") ||
+		strings.Contains(lower, "misinterpretation")
+
+	// If there are NO valid format markers AND it's long, it's definitely a tutorial
+	if !hasValidFormat && len(content) > 200 {
+		slog.Warn("LLM output has no charter format markers — likely a tutorial", "length", len(content))
+		// Try to extract just the first sentence
+		firstSentEnd := -1
+		for _, sep := range []string{". ", ".\n", "! ", "?\n"} {
+			if idx := strings.Index(content, sep); idx > 10 && (firstSentEnd == -1 || idx < firstSentEnd) {
+				firstSentEnd = idx + len(sep)
+			}
+		}
+		if firstSentEnd > 0 && firstSentEnd < 200 {
+			return strings.TrimSpace(content[:firstSentEnd]) +
+				"\n\n[LLM generated implementation content instead of specification — output discarded]"
+		}
+		return "[LLM generated implementation content instead of specification — output discarded]"
 	}
-	for _, p := range forbiddenPatterns {
+
+	// Pattern-based cutoff for mixed output (valid start + implementation bleed)
+	cutoffPatterns := []string{
+		"```",
+		"here's how",
+		"step 1",
+		"**step",
+		"you need to",
+		"you should",
+		"you'll need",
+		"let me show",
+		"let's outline",
+		"create a new file",
+		"add the following",
+		"copy the template",
+		"git add",
+		"git commit",
+		"runs-on:",
+		"uses: actions/",
+		"detailed steps",
+		"prerequisites:",
+		"sample workflow",
+		"here's a sample",
+	}
+
+	for _, p := range cutoffPatterns {
 		if strings.Contains(lower, p) {
 			slog.Warn("LLM generated implementation content", "pattern", p, "truncating", true)
 			idx := strings.Index(lower, p)
-			if idx > 0 {
-				return strings.TrimSpace(content[:idx])
+			if idx > 20 {
+				return strings.TrimSpace(content[:idx]) +
+					"\n\n[Response truncated — LLM generated implementation content]"
 			}
-			return "[response removed — contained implementation advice]"
+			return "[Response removed — contained implementation advice]"
 		}
 	}
 
-	// If response is very long, it's likely a tutorial
-	if len(content) > 800 {
-		lastQ := strings.LastIndex(content[:800], "?")
-		if lastQ > 0 {
-			return strings.TrimSpace(content[:lastQ+1])
-		}
-		lastNewline := strings.LastIndex(content[:800], "\n")
-		if lastNewline > 100 {
-			return strings.TrimSpace(content[:lastNewline]) + "\n[response truncated]"
-		}
-		return content[:800] + "\n[response truncated]"
+	// Hard length limit as final safety net
+	if len(content) > 1000 {
+		return strings.TrimSpace(content[:1000]) +
+			"\n\n[Response truncated — exceeded maximum length]"
 	}
 
 	return content
@@ -708,8 +727,10 @@ func (d *Dialogue) charterSummary() string {
 
 func (d *Dialogue) synthesize(ctx context.Context) error {
 	summary := d.charterSummary()
+	synthCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	var buf bytes.Buffer
-	_, err := d.routingStreamer.Stream(ctx, models.Mid, models.CompletionRequest{
+	_, err := d.routingStreamer.Stream(synthCtx, models.Mid, models.CompletionRequest{
 		System:   SynthesizePrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
 	}, &buf)
@@ -729,8 +750,10 @@ func (d *Dialogue) synthesize(ctx context.Context) error {
 
 func (d *Dialogue) counterspec(ctx context.Context) error {
 	summary := d.charterSummary()
+	csCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	var buf bytes.Buffer
-	_, err := d.routingStreamer.Stream(ctx, models.Frontier, models.CompletionRequest{
+	_, err := d.routingStreamer.Stream(csCtx, models.Frontier, models.CompletionRequest{
 		System:   CounterSpecPrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
 	}, &buf)
