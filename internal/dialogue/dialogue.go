@@ -23,6 +23,10 @@ import (
 //go:embed prompts/kickoff.md
 var KickoffPrompt string
 
+// AcknowledgePrompt is the embedded system prompt for the field acknowledgment step.
+//go:embed prompts/acknowledge.md
+var AcknowledgePrompt string
+
 // AskNonGoalsPrompt is the embedded system prompt for eliciting non-goals from the user.
 //go:embed prompts/ask_non_goals.md
 var AskNonGoalsPrompt string
@@ -248,7 +252,7 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 	return d.runConversation(ctx)
 }
 
-func (d *Dialogue) runConversation(ctx context.Context) (*Result, error) {
+	func (d *Dialogue) runConversation(ctx context.Context) (*Result, error) {
 	for d.turn < d.budget {
 		field := d.nextFieldToDiscuss()
 		if field == "" {
@@ -281,6 +285,10 @@ func (d *Dialogue) runConversation(ctx context.Context) (*Result, error) {
 
 		if err := d.extractField(field, answer); err != nil {
 			slog.Warn("extraction had issues, keeping raw content", "field", field, "error", err)
+		}
+
+		if err := d.acknowledge(ctx, field, answer); err != nil {
+			slog.Warn("acknowledge step failed", "field", field, "error", err)
 		}
 
 		d.turn++
@@ -530,6 +538,31 @@ func (d *Dialogue) extractField(field fieldName, answer string) error {
 	default:
 		return nil
 	}
+}
+
+func (d *Dialogue) acknowledge(ctx context.Context, field fieldName, answer string) error {
+	summary := d.charterSummary()
+	userMsg := fmt.Sprintf("Field: %s\nUser's answer: %s\n\nCurrent charter state:\n%s", fieldLabels[field], answer, summary)
+
+	fmt.Fprintf(d.output, "%s ", styleThink.Render("  Reviewing"))
+
+	resp, err := d.routingStreamer.Complete(ctx, models.Cheap, models.CompletionRequest{
+		System:   AcknowledgePrompt,
+		Messages: []models.Message{{Role: "user", Content: userMsg}},
+	})
+	if err != nil {
+		return fmt.Errorf("acknowledge LLM call: %w", err)
+	}
+
+	content := strings.TrimSpace(resp.Content)
+
+	if strings.Contains(content, "Got it, moving on") {
+		fmt.Fprintf(d.output, "%s\n", styleDone.Render("✓"))
+		return nil
+	}
+
+	fmt.Fprintf(d.output, "\n%s\n", styleAccent.Render(content))
+	return nil
 }
 
 func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (string, error) {
