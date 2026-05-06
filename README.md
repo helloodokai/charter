@@ -1,6 +1,6 @@
-# charter
-
 <p align="center"><img src="charter-logo.png" alt="charter logo" width="200"></p>
+
+# charter
 
 <p align="center"><img src="demo.gif" alt="charter demo" width="600"></p>
 
