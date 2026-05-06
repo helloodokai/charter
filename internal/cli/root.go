@@ -26,8 +26,8 @@ var rootCmd = &cobra.Command{
 	Long: `CHARTER turns fuzzy human intent — a half-written GitHub issue, a Slack
 thread, a "hey can you…" message — into a hardened, versioned, machine-readable
 specification that downstream coding agents consume as a contract.`,
-	Version:             Version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		cmd.Root().Version = Version
 		repoRoot, _ := cmd.Flags().GetString("repo-root")
 		if repoRoot == "" {
 			dir, err := os.Getwd()
@@ -45,13 +45,14 @@ specification that downstream coding agents consume as a contract.`,
 }
 
 func init() {
-	rootCmd.SetVersionTemplate(fmt.Sprintf("charter v{{.Version}} (commit: %s, built: %s)\n", Commit, Date))
 	rootCmd.PersistentFlags().String("repo-root", "", "repository root directory (defaults to cwd)")
 	rootCmd.PersistentFlags().String("profile", "", "model profile: cloud, local (defaults to config)")
 }
 
 // Execute runs the root CLI command.
 func Execute() {
+	rootCmd.Version = Version
+	rootCmd.SetVersionTemplate("charter v{{.Version}} (commit: " + Commit + ", built: " + Date + ")\n")
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
