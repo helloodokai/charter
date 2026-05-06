@@ -66,177 +66,147 @@ AMBIGUITIES FLAGGED:
 	require.Len(t, cs.AmbiguitiesFlagged, 2)
 }
 
-func TestPlanGaps(t *testing.T) {
+// --- Field tracking tests ---
+
+func TestIsFieldFilledEmptyCharter(t *testing.T) {
 	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
 	d := &Dialogue{charter: c, cfg: defaultTestConfig()}
-	gaps := d.planGaps()
-	require.NotEmpty(t, gaps)
-	require.Equal(t, GapGoal, gaps[0].Type)
+
+	require.False(t, d.isFieldFilled(fieldGoal))
+	require.False(t, d.isFieldFilled(fieldContext))
+	require.False(t, d.isFieldFilled(fieldNonGoals))
+	require.False(t, d.isFieldFilled(fieldAcceptance))
+	require.False(t, d.isFieldFilled(fieldEdgeCases))
+	require.False(t, d.isFieldFilled(fieldBlastRadius))
+	require.False(t, d.isFieldFilled(fieldConstraints))
+	require.False(t, d.isFieldFilled(fieldUnknowns))
+	require.False(t, d.isFieldFilled(fieldRisk))
 }
 
-func TestPlanGapsWithGoal(t *testing.T) {
-	c := charter.New("Add login page", charter.Source{Type: "stdin"}, "tester")
-	c.AcceptanceCriteria = []charter.AcceptanceCriterion{
-		{ID: "ac-1", Statement: "works", Verification: "test"},
-	}
-	d := &Dialogue{charter: c, cfg: defaultTestConfig()}
-	gaps := d.planGaps()
-	require.Equal(t, GapContext, gaps[0].Type)
-}
-
-func defaultTestConfig() *config.Config {
-	return config.Default()
-}
-
-// --- Resume mode tests ---
-
-func TestPlanGapsResumeSkipsPopulatedFields(t *testing.T) {
-	c := charter.New("Add login page", charter.Source{Type: "stdin"}, "tester")
-	c.Context = "Existing context"
-	c.NonGoals = []string{"no admin panel"}
-	c.AcceptanceCriteria = []charter.AcceptanceCriterion{
-		{ID: "ac-1", Statement: "works", Verification: "test"},
-	}
-	c.EdgeCases = []string{"timeout"}
-	c.BlastRadius = charter.BlastRadius{
-		Files:    []string{"src/auth/**"},
-		Services: []string{"auth-service"},
-	}
-	c.Constraints = charter.Constraints{
-		Performance:  []string{"p99 < 100ms"},
-		Security:     []string{"OAuth2"},
-		Compatibility: []string{"v1 API"},
-		Style:        []string{"existing patterns"},
-		Dependencies: []string{"Go 1.22"},
-	}
-	c.Unknowns = []charter.Unknown{
-		{ID: "unk-1", Question: "what about X?", Blocking: true},
-	}
-	c.Risk = charter.RiskLow
-	c.RollbackPlan = "revert the deployment"
-
-	d := &Dialogue{
-		charter:    c,
-		cfg:        defaultTestConfig(),
-		resumeMode: true,
-		output:     io.Discard,
-	}
-
-	gaps := d.planGaps()
-
-	gapTypes := make(map[GapType]bool)
-	for _, g := range gaps {
-		gapTypes[g.Type] = true
-	}
-
-	require.False(t, gapTypes[GapGoal], "should skip goal when already set")
-	require.False(t, gapTypes[GapContext], "should skip context when already set")
-	require.False(t, gapTypes[GapNonGoals], "should skip non-goals when already set with resume")
-	require.False(t, gapTypes[GapAcceptance], "should skip acceptance when already set with resume")
-	require.False(t, gapTypes[GapEdgeCases], "should skip edge cases when already set with resume")
-	require.False(t, gapTypes[GapBlastRadius], "should skip blast radius when already set")
-	require.False(t, gapTypes[GapConstraints], "should skip constraints when already set with resume")
-	require.False(t, gapTypes[GapUnknowns], "should skip unknowns when already set")
-	require.False(t, gapTypes[GapRisk], "should skip risk when already set with resume")
-	require.False(t, gapTypes[GapRollback], "should skip rollback when already set with resume")
-
-	require.True(t, gapTypes[GapSynthesize], "should always include synthesize")
-	require.True(t, gapTypes[GapCounterSpec], "should always include counterspec")
-}
-
-func TestPlanGapsWithoutResumeIncludesAllGaps(t *testing.T) {
-	c := charter.New("Add login page", charter.Source{Type: "stdin"}, "tester")
-	c.Context = "Existing context"
-	c.NonGoals = []string{"no admin panel"}
-	c.AcceptanceCriteria = []charter.AcceptanceCriterion{
-		{ID: "ac-1", Statement: "works", Verification: "test"},
-	}
-	c.EdgeCases = []string{"timeout"}
-	c.BlastRadius = charter.BlastRadius{
-		Files:    []string{"src/auth/**"},
-		Services: []string{"auth-service"},
-	}
-	c.Constraints = charter.Constraints{
-		Performance:  []string{"p99 < 100ms"},
-		Security:     []string{"OAuth2"},
-		Compatibility: []string{"v1 API"},
-		Style:        []string{"existing patterns"},
-		Dependencies: []string{"Go 1.22"},
-	}
-	c.Unknowns = []charter.Unknown{
-		{ID: "unk-1", Question: "what about X?", Blocking: true},
-	}
-	c.Risk = charter.RiskLow
-	c.RollbackPlan = "revert the deployment"
-
-	d := &Dialogue{
-		charter:    c,
-		cfg:        defaultTestConfig(),
-		resumeMode: false,
-		output:     io.Discard,
-	}
-
-	gaps := d.planGaps()
-
-	gapTypes := make(map[GapType]bool)
-	for _, g := range gaps {
-		gapTypes[g.Type] = true
-	}
-
-	require.False(t, gapTypes[GapGoal], "goal is set, skipped regardless of resume")
-	require.False(t, gapTypes[GapContext], "context is set, skipped regardless of resume")
-	require.True(t, gapTypes[GapNonGoals], "non-goals re-asked without resume even when populated")
-	require.True(t, gapTypes[GapAcceptance], "acceptance criteria re-asked without resume even when populated")
-	require.True(t, gapTypes[GapEdgeCases], "edge cases re-asked without resume even when populated")
-	require.False(t, gapTypes[GapBlastRadius], "blast radius has data, skipped regardless of resume")
-	require.True(t, gapTypes[GapConstraints], "constraints re-asked without resume even when populated")
-	require.False(t, gapTypes[GapUnknowns], "unknowns has data, skipped regardless of resume")
-	require.True(t, gapTypes[GapRisk], "risk re-asked without resume even when populated")
-}
-
-func TestPlanGapsResumeEmptyCharterStillIncludesGoal(t *testing.T) {
-	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
-
-	d := &Dialogue{
-		charter:    c,
-		cfg:        defaultTestConfig(),
-		resumeMode: true,
-		output:     io.Discard,
-	}
-
-	gaps := d.planGaps()
-
-	gapTypes := make(map[GapType]bool)
-	for _, g := range gaps {
-		gapTypes[g.Type] = true
-	}
-
-	require.True(t, gapTypes[GapGoal], "should include Goal when empty even with resume")
-	require.True(t, gapTypes[GapSynthesize], "should always include synthesize")
-	require.True(t, gapTypes[GapCounterSpec], "should always include counterspec")
-}
-
-func TestPlanGapsResumeSkipsBlastRadiusButNotBlastRadiusGapWhenEmpty(t *testing.T) {
-	c := charter.New("My goal", charter.Source{Type: "stdin"}, "tester")
+func TestIsFieldFilledPopulatedCharter(t *testing.T) {
+	c := charter.New("Add login", charter.Source{Type: "stdin"}, "tester")
 	c.Context = "Some context"
-
-	d := &Dialogue{
-		charter:    c,
-		cfg:        defaultTestConfig(),
-		resumeMode: true,
-		output:     io.Discard,
+	c.NonGoals = []string{"no admin panel"}
+	c.AcceptanceCriteria = []charter.AcceptanceCriterion{
+		{ID: "ac-1", Statement: "works", Verification: "test"},
 	}
-
-	gaps := d.planGaps()
-
-	gapTypes := make(map[GapType]bool)
-	for _, g := range gaps {
-		gapTypes[g.Type] = true
+	c.EdgeCases = []string{"timeout"}
+	c.BlastRadius = charter.BlastRadius{
+		Files:    []string{"src/auth/**"},
+		Services: []string{"auth-service"},
 	}
+	c.Constraints = charter.Constraints{
+		Performance:  []string{"p99 < 100ms"},
+		Security:     []string{"OAuth2"},
+		Compatibility: []string{"v1 API"},
+		Style:        []string{"existing patterns"},
+		Dependencies: []string{"Go 1.22"},
+	}
+	c.Unknowns = []charter.Unknown{
+		{ID: "unk-1", Question: "what about X?", Blocking: true},
+	}
+	c.Risk = charter.RiskLow
 
-	require.True(t, gapTypes[GapBlastRadius], "should include BlastRadius when empty even with resume")
-	require.True(t, gapTypes[GapNonGoals], "should include NonGoals when empty even with resume (list is empty)")
+	d := &Dialogue{charter: c, cfg: defaultTestConfig()}
+
+	require.True(t, d.isFieldFilled(fieldGoal))
+	require.True(t, d.isFieldFilled(fieldContext))
+	require.True(t, d.isFieldFilled(fieldNonGoals))
+	require.True(t, d.isFieldFilled(fieldAcceptance))
+	require.True(t, d.isFieldFilled(fieldEdgeCases))
+	require.True(t, d.isFieldFilled(fieldBlastRadius))
+	require.True(t, d.isFieldFilled(fieldConstraints))
+	require.True(t, d.isFieldFilled(fieldUnknowns))
+	require.True(t, d.isFieldFilled(fieldRisk))
 }
+
+func TestMissingFields(t *testing.T) {
+	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
+	d := &Dialogue{charter: c, cfg: defaultTestConfig(), output: io.Discard}
+
+	missing := d.missingFields()
+	require.Contains(t, missing, "Goal")
+	require.Contains(t, missing, "Context")
+	require.Contains(t, missing, "Non-Goals")
+	require.Contains(t, missing, "Acceptance Criteria")
+	require.Contains(t, missing, "Edge Cases")
+	require.Contains(t, missing, "Blast Radius")
+	require.Contains(t, missing, "Constraints")
+	require.Contains(t, missing, "Unknowns")
+	require.Contains(t, missing, "Risk Assessment")
+}
+
+func TestMissingFieldsWithPopulatedCharter(t *testing.T) {
+	c := charter.New("Add login", charter.Source{Type: "stdin"}, "tester")
+	c.Context = "Some context"
+	c.NonGoals = []string{"no admin panel"}
+	c.AcceptanceCriteria = []charter.AcceptanceCriterion{
+		{ID: "ac-1", Statement: "works", Verification: "test"},
+	}
+	c.EdgeCases = []string{"timeout"}
+	c.BlastRadius = charter.BlastRadius{
+		Files:    []string{"src/auth/**"},
+		Services: []string{"auth-service"},
+	}
+	c.Constraints = charter.Constraints{
+		Performance:  []string{"p99 < 100ms"},
+		Security:     []string{"OAuth2"},
+		Compatibility: []string{"v1 API"},
+		Style:        []string{"existing patterns"},
+		Dependencies: []string{"Go 1.22"},
+	}
+	c.Unknowns = []charter.Unknown{
+		{ID: "unk-1", Question: "what about X?", Blocking: true},
+	}
+	c.Risk = charter.RiskLow
+	c.RollbackPlan = "revert the deployment"
+
+	d := &Dialogue{charter: c, cfg: defaultTestConfig(), output: io.Discard}
+	missing := d.missingFields()
+	require.Empty(t, missing)
+}
+
+func TestFilledFields(t *testing.T) {
+	c := charter.New("Add login", charter.Source{Type: "stdin"}, "tester")
+	d := &Dialogue{charter: c, cfg: defaultTestConfig(), output: io.Discard}
+
+	filled := d.filledFields()
+	require.Contains(t, filled, "Goal")
+	require.NotContains(t, filled, "Context")
+}
+
+func TestNextFieldToDiscuss(t *testing.T) {
+	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
+	d := &Dialogue{charter: c, cfg: defaultTestConfig()}
+
+	field := d.nextFieldToDiscuss()
+	require.Equal(t, fieldGoal, field)
+
+	c.Goal = "Add login"
+	field = d.nextFieldToDiscuss()
+	require.Equal(t, fieldContext, field)
+}
+
+func TestNextFieldToDiscussAllFilled(t *testing.T) {
+	c := charter.New("Add login", charter.Source{Type: "stdin"}, "tester")
+	c.Context = "Some context"
+	c.NonGoals = []string{"no admin"}
+	c.AcceptanceCriteria = []charter.AcceptanceCriterion{
+		{ID: "ac-1", Statement: "works", Verification: "test"},
+	}
+	c.EdgeCases = []string{"timeout"}
+	c.BlastRadius = charter.BlastRadius{Files: []string{"src/**"}}
+	c.Constraints = charter.Constraints{Performance: []string{"p99 < 100ms"}}
+	c.Unknowns = []charter.Unknown{{ID: "unk-1", Question: "what?", Blocking: true}}
+	c.Risk = charter.RiskLow
+	c.RollbackPlan = "just revert"
+
+	d := &Dialogue{charter: c, cfg: defaultTestConfig()}
+	field := d.nextFieldToDiscuss()
+	require.Equal(t, fieldName(""), field, "all fields filled, should return empty string")
+}
+
+// --- Option tests ---
 
 func TestWithResumeOption(t *testing.T) {
 	c := charter.New("", charter.Source{Type: "stdin"}, "tester")
@@ -420,4 +390,8 @@ func TestStreamCompleteReturnsErrorOnRouterFailure(t *testing.T) {
 
 	require.Error(t, err)
 	require.Equal(t, "", content)
+}
+
+func defaultTestConfig() *config.Config {
+	return config.Default()
 }

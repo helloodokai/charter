@@ -19,142 +19,151 @@ import (
 	"github.com/helloodokai/charter/internal/routing"
 )
 
-//go:embed prompts/kickoff.md
 // KickoffPrompt is the embedded system prompt for the initial charter kickoff turn.
+//go:embed prompts/kickoff.md
 var KickoffPrompt string
 
-//go:embed prompts/ask_non_goals.md
 // AskNonGoalsPrompt is the embedded system prompt for eliciting non-goals from the user.
+//go:embed prompts/ask_non_goals.md
 var AskNonGoalsPrompt string
 
-//go:embed prompts/ask_edge_cases.md
 // AskEdgeCasesPrompt is the embedded system prompt for identifying edge cases.
+//go:embed prompts/ask_edge_cases.md
 var AskEdgeCasesPrompt string
 
-//go:embed prompts/ask_blast_radius.md
 // AskBlastRadiusPrompt is the embedded system prompt for analyzing blast radius.
+//go:embed prompts/ask_blast_radius.md
 var AskBlastRadiusPrompt string
 
-//go:embed prompts/ask_constraints.md
 // AskConstraintsPrompt is the embedded system prompt for inferring project constraints.
+//go:embed prompts/ask_constraints.md
 var AskConstraintsPrompt string
 
-//go:embed prompts/synthesize.md
 // SynthesizePrompt is the embedded system prompt for the synthesis pass.
+//go:embed prompts/synthesize.md
 var SynthesizePrompt string
 
-//go:embed prompts/counterspec.md
 // CounterSpecPrompt is the embedded system prompt for the counter-speculative analysis.
+//go:embed prompts/counterspec.md
 var CounterSpecPrompt string
 
-// GapType enumerates the categories of information the dialogue must fill.
-type GapType string
+// ConversationPrompt is the embedded system prompt for the conversation-driven dialogue mode.
+//go:embed prompts/conversation.md
+var ConversationPrompt string
 
-// Gap types the dialogue tracks.
-const (
-	GapGoal          GapType = "goal"
-	GapContext       GapType = "context"
-	GapNonGoals      GapType = "non_goals"
-	GapAcceptance    GapType = "acceptance_criteria"
-	GapEdgeCases     GapType = "edge_cases"
-	GapBlastRadius   GapType = "blast_radius"
-	GapConstraints   GapType = "constraints"
-	GapUnknowns      GapType = "unknowns"
-	GapRisk          GapType = "risk"
-	GapRollback      GapType = "rollback"
-	GapSynthesize    GapType = "synthesize"
-	GapCounterSpec   GapType = "counterspec"
-	GapDone          GapType = "done"
-)
-
-// Gap represents a missing piece of information that the dialogue should fill.
-type Gap struct {
-	Type     GapType
-	Priority int
-	Prompt   string
-	Field    string
-}
+// ExtractPrompt is the embedded system prompt for extracting structured data from user responses.
+//go:embed prompts/extract.md
+var ExtractPrompt string
 
 type routerStreamer interface {
 	Stream(ctx context.Context, tier models.Tier, req models.CompletionRequest, w io.Writer) (*models.CompletionResponse, error)
 	Complete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (*models.CompletionResponse, error)
 }
 
-// Dialogue drives an interactive session that fills out a Charter through guided prompts.
+type fieldName string
+
+const (
+	fieldGoal        fieldName = "goal"
+	fieldContext     fieldName = "context"
+	fieldNonGoals    fieldName = "non_goals"
+	fieldAcceptance  fieldName = "acceptance_criteria"
+	fieldEdgeCases   fieldName = "edge_cases"
+	fieldBlastRadius fieldName = "blast_radius"
+	fieldConstraints fieldName = "constraints"
+	fieldUnknowns    fieldName = "unknowns"
+	fieldRisk        fieldName = "risk"
+	fieldRollback    fieldName = "rollback"
+)
+
+var fieldOrder = []fieldName{
+	fieldGoal,
+	fieldContext,
+	fieldNonGoals,
+	fieldAcceptance,
+	fieldEdgeCases,
+	fieldBlastRadius,
+	fieldConstraints,
+	fieldUnknowns,
+	fieldRisk,
+	fieldRollback,
+}
+
+var fieldLabels = map[fieldName]string{
+	fieldGoal:        "Goal",
+	fieldContext:     "Context",
+	fieldNonGoals:    "Non-Goals",
+	fieldAcceptance:  "Acceptance Criteria",
+	fieldEdgeCases:   "Edge Cases",
+	fieldBlastRadius: "Blast Radius",
+	fieldConstraints: "Constraints",
+	fieldUnknowns:    "Unknowns",
+	fieldRisk:        "Risk Assessment",
+	fieldRollback:    "Rollback Plan",
+}
+
+var fieldDescriptions = map[fieldName]string{
+	fieldGoal:        "the one-sentence objective of this charter",
+	fieldContext:     "background information an outsider would need",
+	fieldNonGoals:    "what this charter explicitly does NOT cover",
+	fieldAcceptance:  "testable criteria that prove the goal is met",
+	fieldEdgeCases:   "boundary conditions and failure scenarios",
+	fieldBlastRadius: "files, services, and data stores this change touches",
+	fieldConstraints:  "performance, security, compatibility, and style requirements",
+	fieldUnknowns:    "open questions that could block progress",
+	fieldRisk:        "how risky this change is (low/medium/high/critical) and why",
+	fieldRollback:    "how to safely revert if something goes wrong",
+}
+
+// Dialogue drives an interactive conversation that fills out a Charter through guided turns.
 type Dialogue struct {
 	charter         *charter.Charter
 	transcript      []charter.TranscriptTurn
-	gaps            []Gap
 	turn            int
 	budget          int
 	router          *routing.Router
 	routingStreamer routerStreamer
 	cfg             *config.Config
-	nonInteractive  bool
+	nonInteractive   bool
 	inputChan       chan string
 	outputChan      chan string
 	output          io.Writer
 	chartersDir     string
 	resumeMode      bool
+	conversation    []chatTurn
+}
+
+type chatTurn struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // Result holds the outcome of a completed dialogue session.
 type Result struct {
 	Charter   *charter.Charter
-	GapsLeft  []Gap
 	TurnsUsed int
 }
 
 var (
-	styleGap     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	styleHeader  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
 	styleThink   = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("8"))
-	styleSection = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
 	styleDim     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	styleAccent  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
 	styleWarn    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
+	styleField   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	styleDone    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
+	styleDivider = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
-
-func gapLabel(g GapType) string {
-	switch g {
-	case GapGoal:
-		return "Goal"
-	case GapContext:
-		return "Context"
-	case GapNonGoals:
-		return "Non-Goals"
-	case GapAcceptance:
-		return "Acceptance Criteria"
-	case GapEdgeCases:
-		return "Edge Cases"
-	case GapBlastRadius:
-		return "Blast Radius"
-	case GapConstraints:
-		return "Constraints"
-	case GapUnknowns:
-		return "Unknowns"
-	case GapRisk:
-		return "Risk Assessment"
-	case GapRollback:
-		return "Rollback Plan"
-	case GapSynthesize:
-		return "Synthesis"
-	case GapCounterSpec:
-		return "Counter-Spec Review"
-	default:
-		return string(g)
-	}
-}
 
 // New creates a Dialogue ready to fill the given charter.
 func New(c *charter.Charter, router *routing.Router, cfg *config.Config, opts ...Option) *Dialogue {
 	d := &Dialogue{
 		charter:         c,
 		transcript:      c.Transcript,
-		budget:          cfg.Dialogue.TurnBudget,
-		router:          router,
-		routingStreamer: router,
-		cfg:             cfg,
-		output:          os.Stderr,
+		budget:           cfg.Dialogue.TurnBudget,
+		router:           router,
+		routingStreamer:  router,
+		cfg:              cfg,
+		output:           os.Stderr,
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -173,12 +182,12 @@ func WithBudget(n int) Option {
 	return func(d *Dialogue) { d.budget = n }
 }
 
-// WithNonInteractive disables interactive prompts when true.
+// WithNonInteractive disables interactive prompts.
 func WithNonInteractive(v bool) Option {
 	return func(d *Dialogue) { d.nonInteractive = v }
 }
 
-// WithChannels sets input/output channels for programmatic dialogue interaction.
+// WithChannels sets input/output channels for programmatic dialogue.
 func WithChannels(input chan string, output chan string) Option {
 	return func(d *Dialogue) {
 		d.inputChan = input
@@ -186,42 +195,63 @@ func WithChannels(input chan string, output chan string) Option {
 	}
 }
 
-// WithOutput sets the writer used for dialogue output.
+// WithOutput sets the writer for dialogue output.
 func WithOutput(w io.Writer) Option {
 	return func(d *Dialogue) { d.output = w }
 }
 
-// WithChartersDir sets the directory where charters are persisted between turns.
+// WithChartersDir sets the directory for persisting charters between turns.
 func WithChartersDir(dir string) Option {
 	return func(d *Dialogue) { d.chartersDir = dir }
 }
 
-// WithResume enables resume mode, skipping gaps already filled in the charter.
+// WithResume enables resume mode, skipping fields already filled.
 func WithResume(v bool) Option {
 	return func(d *Dialogue) { d.resumeMode = v }
 }
 
-// Run executes the dialogue session, iterating through gaps until the budget is exhausted or all gaps are filled.
+// Run executes the dialogue session as a conversation driven by the LLM.
 func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
-	d.gaps = d.planGaps()
+	d.transcript = d.charter.Transcript
+	for _, t := range d.transcript {
+		d.conversation = append(d.conversation, chatTurn{Role: t.Role, Content: t.Content})
+	}
 
-	fmt.Fprintf(d.output, "\n%s\n", styleSection.Render(" Charter Dialogue "))
-	fmt.Fprintf(d.output, "%s\n\n", styleDim.Render(fmt.Sprintf("Turns: 0/%d | Gaps: %d", d.budget, len(d.gaps))))
+	missing := d.missingFields()
+	filled := d.filledFields()
 
-	for d.turn < d.budget && len(d.gaps) > 0 {
-		gap := d.gaps[0]
-		if gap.Type == GapDone {
+	fmt.Fprintf(d.output, "\n%s\n", styleHeader.Render(" Charter Dialogue "))
+	if len(filled) > 0 {
+		fmt.Fprintf(d.output, "%s\n", styleDone.Render(fmt.Sprintf("  Already set: %s", strings.Join(filled, ", "))))
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render(fmt.Sprintf("  Need: %s", strings.Join(missing, ", "))))
+	}
+	fmt.Fprintf(d.output, "%s\n\n", styleDim.Render(fmt.Sprintf("  Turns: 0/%d", d.budget)))
+
+	if d.nonInteractive {
+		return d.runNonInteractive(ctx)
+	}
+
+	return d.runConversation(ctx)
+}
+
+func (d *Dialogue) runConversation(ctx context.Context) (*Result, error) {
+	for d.turn < d.budget {
+		field := d.nextFieldToDiscuss()
+		if field == "" {
 			break
 		}
 
-		fmt.Fprintf(d.output, "\n%s\n", styleGap.Render(fmt.Sprintf("▸ Step %d: %s", d.turn+1, gapLabel(gap.Type))))
+		fmt.Fprintf(d.output, "\n%s\n", styleField.Render(fmt.Sprintf("▸ %s", fieldLabels[field])))
+		fmt.Fprintf(d.output, "%s\n", styleDim.Render(fmt.Sprintf("  Discussing %s — %s", fieldLabels[field], fieldDescriptions[field])))
 
-		question, err := d.generateQuestion(ctx, gap)
+		question, err := d.generateFieldQuestion(ctx, field)
 		if err != nil {
-			return nil, fmt.Errorf("turn %d: generating question for %s: %w", d.turn, gap.Type, err)
+			return nil, fmt.Errorf("turn %d: generating question for %s: %w", d.turn, field, err)
 		}
 
-		answer, err := d.askUser(ctx, gap, question)
+		answer, err := d.askUser(ctx, question)
 		if err != nil {
 			return nil, fmt.Errorf("turn %d: asking user: %w", d.turn, err)
 		}
@@ -230,22 +260,56 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 			break
 		}
 
-		if err := d.extract(ctx, gap, answer); err != nil {
-			return nil, fmt.Errorf("turn %d: extracting %s: %w", d.turn, gap.Type, err)
+		if answer == "" {
+			d.turn++
+			continue
 		}
 
-		d.gaps = d.gaps[1:]
-		d.turn++
+		if err := d.extractField(ctx, field, answer); err != nil {
+			slog.Warn("extraction had issues, keeping raw content", "field", field, "error", err)
+		}
 
+		d.turn++
 		d.persistTranscript()
 
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render(fmt.Sprintf("  Turns: %d/%d | Remaining: %d", d.turn, d.budget, len(d.gaps))))
+		filled := d.filledFields()
+		missing := d.missingFields()
+		fmt.Fprintf(d.output, "%s\n", styleDivider.Render("──────────────────────────────────────"))
+		if len(filled) > 0 {
+			fmt.Fprintf(d.output, "%s  ", styleDone.Render("✓"))
+		}
+		fmt.Fprintf(d.output, "%s", strings.Join(filled, ", "))
+		if len(missing) > 0 {
+			fmt.Fprintf(d.output, "  %s%s", styleDim.Render("⋯ "), strings.Join(missing, ", "))
+		}
+		fmt.Fprintf(d.output, "\n%s\n", styleDim.Render(fmt.Sprintf("  Turn %d/%d", d.turn, d.budget)))
 	}
 
+	return d.finalize(ctx)
+}
+
+func (d *Dialogue) runNonInteractive(ctx context.Context) (*Result, error) {
+	for _, field := range fieldOrder {
+		if d.isFieldFilled(field) {
+			continue
+		}
+		question, err := d.generateFieldQuestion(ctx, field)
+		if err != nil {
+			return nil, fmt.Errorf("generating question for %s: %w", field, err)
+		}
+		d.transcript = append(d.transcript, charter.TranscriptTurn{
+			Role: "tool", At: time.Now().UTC(), Content: question,
+		})
+		d.turn++
+	}
+	return d.finalize(ctx)
+}
+
+func (d *Dialogue) finalize(ctx context.Context) (*Result, error) {
 	fmt.Fprintf(d.output, "\n%s ", styleThink.Render("Synthesizing charter"))
 	if err := d.synthesize(ctx); err != nil {
 		fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render("⚠ Synthesis had issues, charter may be incomplete"))
-		slog.Warn("synthesis failed, charter may be incomplete", "error", err)
+		slog.Warn("synthesis failed", "error", err)
 	} else {
 		fmt.Fprintf(d.output, "%s\n", styleDim.Render("done."))
 	}
@@ -267,7 +331,7 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 		d.charter.Status = charter.StatusReady
 	}
 
-	fmt.Fprintf(d.output, "\n%s\n", styleSection.Render(" ✓ Charter Complete "))
+	fmt.Fprintf(d.output, "\n%s\n", styleHeader.Render(" ✓ Charter Complete "))
 	fmt.Fprintf(d.output, "  Goal: %s\n", d.charter.Goal)
 	fmt.Fprintf(d.output, "  Status: %s\n", d.charter.Status)
 	fmt.Fprintf(d.output, "  Risk: %s\n", d.charter.Risk)
@@ -275,196 +339,176 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 
 	return &Result{
 		Charter:   d.charter,
-		GapsLeft:  d.gaps,
 		TurnsUsed: d.turn,
 	}, nil
 }
 
-func (d *Dialogue) planGaps() []Gap {
-	var gaps []Gap
-
-	if d.charter.Goal == "" {
-		gaps = append(gaps, Gap{Type: GapGoal, Priority: 0})
-	} else if d.resumeMode {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Goal already set — skipping"))
+func (d *Dialogue) nextFieldToDiscuss() fieldName {
+	for _, field := range fieldOrder {
+		if !d.isFieldFilled(field) {
+			return field
+		}
 	}
-	if d.charter.Context == "" {
-		gaps = append(gaps, Gap{Type: GapContext, Priority: 1})
-	} else if d.resumeMode {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Context already set — skipping"))
-	}
-	if len(d.charter.NonGoals) == 0 || !d.resumeMode {
-		gaps = append(gaps, Gap{Type: GapNonGoals, Priority: 2})
-	} else {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Non-goals already set — skipping"))
-	}
-	if len(d.charter.AcceptanceCriteria) == 0 || !d.resumeMode {
-		gaps = append(gaps, Gap{Type: GapAcceptance, Priority: 3})
-	} else if d.resumeMode {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Acceptance criteria already set — skipping"))
-	}
-	if len(d.charter.EdgeCases) == 0 || !d.resumeMode {
-		gaps = append(gaps, Gap{Type: GapEdgeCases, Priority: 4})
-	} else if d.resumeMode {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Edge cases already set — skipping"))
-	}
-	if len(d.charter.BlastRadius.Files) == 0 && len(d.charter.BlastRadius.Services) == 0 {
-		gaps = append(gaps, Gap{Type: GapBlastRadius, Priority: 5})
-	} else if d.resumeMode {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Blast radius already set — skipping"))
-	}
-	constraintsEmpty := len(d.charter.Constraints.Performance) == 0 && len(d.charter.Constraints.Security) == 0 && len(d.charter.Constraints.Compatibility) == 0 && len(d.charter.Constraints.Style) == 0 && len(d.charter.Constraints.Dependencies) == 0
-	if constraintsEmpty || !d.resumeMode {
-		gaps = append(gaps, Gap{Type: GapConstraints, Priority: 6})
-	} else if d.resumeMode {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Constraints already set — skipping"))
-	}
-	if len(d.charter.Unknowns) == 0 {
-		gaps = append(gaps, Gap{Type: GapUnknowns, Priority: 7})
-	} else if d.resumeMode {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Unknowns already set — skipping"))
-	}
-	if d.charter.Risk == "" || !d.resumeMode {
-		gaps = append(gaps, Gap{Type: GapRisk, Priority: 8})
-	} else if d.resumeMode {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Risk already assessed — skipping"))
-	}
-
-	shouldAskRollback := d.charter.Risk == charter.RiskHigh || d.charter.Risk == charter.RiskCritical ||
-		d.cfg.Dialogue.AskForRollback == "high" || d.cfg.Dialogue.AskForRollback == "medium" ||
-		d.cfg.Dialogue.AskForRollback == "all"
-	if shouldAskRollback && d.charter.RollbackPlan == "" {
-		gaps = append(gaps, Gap{Type: GapRollback, Priority: 9})
-	} else if d.resumeMode && d.charter.RollbackPlan != "" {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("  ✓ Rollback plan already set — skipping"))
-	}
-
-	gaps = append(gaps, Gap{Type: GapSynthesize, Priority: 10})
-	gaps = append(gaps, Gap{Type: GapCounterSpec, Priority: 11})
-
-	return gaps
+	return ""
 }
 
-func (d *Dialogue) generateQuestion(ctx context.Context, gap Gap) (string, error) {
-	charterSummary := d.charterSummary()
-
-	switch gap.Type {
-	case GapGoal, GapContext:
-		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Thinking..."))
-		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
-			System:   KickoffPrompt,
-			Messages: []models.Message{{Role: "user", Content: d.sourceSummary()}},
-		})
-		if err != nil {
-			return "", fmt.Errorf("kickoff LLM call: %w", err)
+func (d *Dialogue) isFieldFilled(field fieldName) bool {
+	switch field {
+	case fieldGoal:
+		return d.charter.Goal != ""
+	case fieldContext:
+		return d.charter.Context != ""
+	case fieldNonGoals:
+		return len(d.charter.NonGoals) > 0
+	case fieldAcceptance:
+		return len(d.charter.AcceptanceCriteria) > 0
+	case fieldEdgeCases:
+		return len(d.charter.EdgeCases) > 0
+	case fieldBlastRadius:
+		return len(d.charter.BlastRadius.Files) > 0 || len(d.charter.BlastRadius.Services) > 0 || len(d.charter.BlastRadius.Data) > 0
+	case fieldConstraints:
+		return len(d.charter.Constraints.Performance) > 0 || len(d.charter.Constraints.Security) > 0 || len(d.charter.Constraints.Compatibility) > 0 || len(d.charter.Constraints.Style) > 0 || len(d.charter.Constraints.Dependencies) > 0
+	case fieldUnknowns:
+		return len(d.charter.Unknowns) > 0
+	case fieldRisk:
+		return d.charter.Risk != ""
+	case fieldRollback:
+		shouldAskRollback := d.charter.Risk == charter.RiskHigh || d.charter.Risk == charter.RiskCritical ||
+			d.cfg.Dialogue.AskForRollback == "high" || d.cfg.Dialogue.AskForRollback == "medium" ||
+			d.cfg.Dialogue.AskForRollback == "all"
+		if !shouldAskRollback {
+			return true
 		}
-		return resp, nil
+		return d.charter.RollbackPlan != ""
+	default:
+		return true
+	}
+}
 
-	case GapNonGoals:
+func (d *Dialogue) missingFields() []string {
+	var missing []string
+	for _, field := range fieldOrder {
+		if !d.isFieldFilled(field) {
+			missing = append(missing, fieldLabels[field])
+		}
+	}
+	return missing
+}
+
+func (d *Dialogue) filledFields() []string {
+	var filled []string
+	for _, field := range fieldOrder {
+		if d.isFieldFilled(field) {
+			filled = append(filled, fieldLabels[field])
+		}
+	}
+	return filled
+}
+
+func (d *Dialogue) generateFieldQuestion(ctx context.Context, field fieldName) (string, error) {
+	switch field {
+	case fieldGoal, fieldContext:
+		if d.charter.Goal == "" && d.charter.Context == "" {
+			fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Starting conversation..."))
+			resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
+				System:   KickoffPrompt,
+				Messages: []models.Message{{Role: "user", Content: d.sourceSummary()}},
+			})
+			if err != nil {
+				return "", fmt.Errorf("kickoff: %w", err)
+			}
+			return resp, nil
+		}
+		if field == fieldGoal && d.charter.Goal != "" {
+			return fmt.Sprintf("**Goal:** Your charter already has this goal: \"%s\"\n\nIs this correct, or would you like to refine it?", d.charter.Goal), nil
+		}
+		if field == fieldContext && d.charter.Context != "" {
+			return fmt.Sprintf("**Context:** You've described the context as: \"%s\"\n\nAnything to add or change?", d.charter.Context), nil
+		}
+
+	case fieldNonGoals:
 		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Generating non-goals..."))
 		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   AskNonGoalsPrompt,
-			Messages: []models.Message{{Role: "user", Content: charterSummary}},
+			Messages: []models.Message{{Role: "user", Content: d.charterSummary()}},
 		})
 		if err != nil {
-			return "", fmt.Errorf("non-goals LLM call: %w", err)
+			return "", fmt.Errorf("non-goals: %w", err)
 		}
 		return resp, nil
 
-	case GapAcceptance:
+	case fieldAcceptance:
 		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Creating acceptance criteria..."))
-		return d.askAcceptanceCriteria(ctx, charterSummary)
+		return d.askAcceptanceCriteria(ctx, d.charterSummary())
 
-	case GapEdgeCases:
+	case fieldEdgeCases:
 		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Identifying edge cases..."))
 		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   AskEdgeCasesPrompt,
-			Messages: []models.Message{{Role: "user", Content: charterSummary}},
+			Messages: []models.Message{{Role: "user", Content: d.charterSummary()}},
 		})
 		if err != nil {
-			return "", fmt.Errorf("edge cases LLM call: %w", err)
+			return "", fmt.Errorf("edge cases: %w", err)
 		}
 		return resp, nil
 
-	case GapBlastRadius:
+	case fieldBlastRadius:
 		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Analyzing blast radius..."))
 		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   AskBlastRadiusPrompt,
-			Messages: []models.Message{{Role: "user", Content: charterSummary}},
+			Messages: []models.Message{{Role: "user", Content: d.charterSummary()}},
 		})
 		if err != nil {
-			return "", fmt.Errorf("blast radius LLM call: %w", err)
+			return "", fmt.Errorf("blast radius: %w", err)
 		}
 		return resp, nil
 
-	case GapConstraints:
+	case fieldConstraints:
 		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Inferring constraints..."))
 		resp, err := d.streamComplete(ctx, models.Mid, models.CompletionRequest{
 			System:   AskConstraintsPrompt,
-			Messages: []models.Message{{Role: "user", Content: charterSummary}},
+			Messages: []models.Message{{Role: "user", Content: d.charterSummary()}},
 		})
 		if err != nil {
-			return "", fmt.Errorf("constraints LLM call: %w", err)
+			return "", fmt.Errorf("constraints: %w", err)
 		}
 		return resp, nil
 
-	case GapUnknowns:
-		return "Are there any open questions or unknowns that could block this work? List anything you're not sure about, and whether it's blocking or can be resolved later.", nil
+	case fieldUnknowns:
+		return "**Unknowns:** Are there any open questions or unknowns that could block this work? List anything you're not sure about, and whether it's blocking or can be resolved later.", nil
 
-	case GapRisk:
+	case fieldRisk:
 		fmt.Fprintf(d.output, "%s\n", styleThink.Render("  Assessing risk level..."))
-		return d.askRisk(ctx, charterSummary)
+		return d.askRisk(ctx, d.charterSummary())
 
-	case GapRollback:
-		return "This charter targets high-or-above risk. What's the rollback plan if something goes wrong? Describe how to safely revert.", nil
-
-	case GapSynthesize, GapCounterSpec:
-		return "", nil
-
-	default:
-		return "", fmt.Errorf("unknown gap type: %s", gap.Type)
+	case fieldRollback:
+		return "**Rollback Plan:** This charter targets high-or-above risk. What's the rollback plan if something goes wrong? Describe how to safely revert.", nil
 	}
+
+	return "", fmt.Errorf("unknown field: %s", field)
 }
 
-func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (string, error) {
-	fmt.Fprintf(d.output, "\n")
-	resp, err := d.routingStreamer.Stream(ctx, tier, req, d.output)
-	fmt.Fprintf(d.output, "\n\n")
-	if err != nil {
-		return "", err
-	}
-	return resp.Content, nil
-}
-
-func (d *Dialogue) askUser(ctx context.Context, gap Gap, question string) (string, error) {
-	if question != "" {
-		d.transcript = append(d.transcript, charter.TranscriptTurn{
-			Role:    "tool",
-			At:      time.Now().UTC(),
-			Content: question,
-		})
-	}
-
-	if d.nonInteractive {
-		return "", nil
-	}
+func (d *Dialogue) askUser(ctx context.Context, question string) (string, error) {
+	d.transcript = append(d.transcript, charter.TranscriptTurn{
+		Role: "tool", At: time.Now().UTC(), Content: question,
+	})
+	d.conversation = append(d.conversation, chatTurn{Role: "assistant", Content: question})
 
 	if d.inputChan != nil && d.outputChan != nil {
 		d.outputChan <- question
 		select {
 		case answer := <-d.inputChan:
 			d.transcript = append(d.transcript, charter.TranscriptTurn{
-				Role:    "human",
-				At:      time.Now().UTC(),
-				Content: answer,
+				Role: "human", At: time.Now().UTC(), Content: answer,
 			})
+			d.conversation = append(d.conversation, chatTurn{Role: "user", Content: answer})
 			return answer, nil
 		case <-ctx.Done():
 			return "", ctx.Err()
 		}
 	}
 
-	fmt.Fprintf(d.output, "%s\n\n", styleAccent.Render("Your response:"))
+	fmt.Fprintf(d.output, "\n%s\n", styleAccent.Render("Your response:"))
 
 	var answer string
 	field := huh.NewText().
@@ -478,42 +522,51 @@ func (d *Dialogue) askUser(ctx context.Context, gap Gap, question string) (strin
 	}
 
 	d.transcript = append(d.transcript, charter.TranscriptTurn{
-		Role:    "human",
-		At:      time.Now().UTC(),
-		Content: answer,
+		Role: "human", At: time.Now().UTC(), Content: answer,
 	})
+	d.conversation = append(d.conversation, chatTurn{Role: "user", Content: answer})
 
 	return answer, nil
 }
 
-func (d *Dialogue) extract(ctx context.Context, gap Gap, answer string) error {
+func (d *Dialogue) extractField(ctx context.Context, field fieldName, answer string) error {
 	if answer == "" {
 		return nil
 	}
 
-	switch gap.Type {
-	case GapGoal, GapContext:
+	switch field {
+	case fieldGoal, fieldContext:
 		return d.extractGoalAndContext(ctx, answer)
-	case GapNonGoals:
+	case fieldNonGoals:
 		return d.extractNonGoals(ctx, answer)
-	case GapAcceptance:
+	case fieldAcceptance:
 		return d.extractAcceptanceCriteria(ctx, answer)
-	case GapEdgeCases:
+	case fieldEdgeCases:
 		return d.extractEdgeCases(ctx, answer)
-	case GapBlastRadius:
+	case fieldBlastRadius:
 		return d.extractBlastRadius(ctx, answer)
-	case GapConstraints:
+	case fieldConstraints:
 		return d.extractConstraints(ctx, answer)
-	case GapUnknowns:
+	case fieldUnknowns:
 		return d.extractUnknowns(answer)
-	case GapRisk:
+	case fieldRisk:
 		return d.extractRisk(ctx, answer)
-	case GapRollback:
+	case fieldRollback:
 		d.charter.RollbackPlan = answer
 		return nil
 	default:
 		return nil
 	}
+}
+
+func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (string, error) {
+	fmt.Fprintf(d.output, "\n")
+	resp, err := d.routingStreamer.Stream(ctx, tier, req, d.output)
+	fmt.Fprintf(d.output, "\n\n")
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
 }
 
 func (d *Dialogue) sourceSummary() string {
@@ -618,6 +671,54 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 }
 
 func (d *Dialogue) enhanceFromSynthesis(synthesis string) {
+}
+
+func (d *Dialogue) askAcceptanceCriteria(ctx context.Context, charterSummary string) (string, error) {
+	prompt := `Given the charter summary below, propose 3-5 acceptance criteria. Each should be:
+1. Testable — you can verify it passed or failed
+2. Specific — no vague words like "works" or "is good"
+3. Minimal — the smallest set that proves the goal is met
+
+Format each as:
+- <statement> (verification: test|manual|metric)
+
+Charter:
+` + charterSummary
+
+	resp, err := d.routingStreamer.Stream(ctx, models.Mid, models.CompletionRequest{
+		System:   "You are a test engineer writing acceptance criteria for a coding agent.",
+		Messages: []models.Message{{Role: "user", Content: prompt}},
+	}, d.output)
+	if err != nil {
+		return "", fmt.Errorf("acceptance criteria LLM call: %w", err)
+	}
+
+	fmt.Fprintf(d.output, "\n")
+	return resp.Content + "\n\nDo you want to add, modify, or remove any of these criteria?", nil
+}
+
+func (d *Dialogue) askRisk(ctx context.Context, charterSummary string) (string, error) {
+	prompt := `Based on the charter summary, assess the risk level. Consider:
+- How many files/services are touched?
+- Are any critical paths affected?
+- How reversible is the change?
+- What's the blast radius?
+
+Rate: low, medium, high, or critical.
+
+Charter:
+` + charterSummary
+
+	resp, err := d.routingStreamer.Stream(ctx, models.Cheap, models.CompletionRequest{
+		System:   "You are a risk assessor for software changes. Be conservative.",
+		Messages: []models.Message{{Role: "user", Content: prompt}},
+	}, d.output)
+	if err != nil {
+		return "", fmt.Errorf("risk assessment LLM call: %w", err)
+	}
+
+	fmt.Fprintf(d.output, "\n")
+	return resp.Content + "\n\nDo you agree with this risk assessment? If not, what should it be and why?", nil
 }
 
 func (d *Dialogue) persistTranscript() {
