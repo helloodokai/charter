@@ -98,6 +98,7 @@ func runDraft(cmd *cobra.Command, args []string) error {
 	chartersDir := cfg.ChartersDir(repoRoot)
 
 	opts := []dialogue.Option{
+		dialogue.WithVersion(Version),
 		dialogue.WithNonInteractive(draftNonInteractive),
 		dialogue.WithChartersDir(chartersDir),
 		dialogue.WithResume(draftResume != ""),

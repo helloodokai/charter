@@ -123,12 +123,13 @@ type Dialogue struct {
 	router          *routing.Router
 	routingStreamer routerStreamer
 	cfg             *config.Config
-	nonInteractive   bool
+	nonInteractive  bool
 	inputChan       chan string
 	outputChan      chan string
 	output          io.Writer
 	chartersDir     string
 	resumeMode      bool
+	version         string
 	conversation    []chatTurn
 }
 
@@ -210,6 +211,11 @@ func WithResume(v bool) Option {
 	return func(d *Dialogue) { d.resumeMode = v }
 }
 
+// WithVersion sets the charter version string for display in the header.
+func WithVersion(v string) Option {
+	return func(d *Dialogue) { d.version = v }
+}
+
 // Run executes the dialogue session as a conversation driven by the LLM.
 func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 	d.transcript = d.charter.Transcript
@@ -220,7 +226,11 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 	missing := d.missingFields()
 	filled := d.filledFields()
 
-	fmt.Fprintf(d.output, "\n%s\n", styleHeader.Render(" Charter Dialogue "))
+	header := " Charter Dialogue "
+	if d.version != "" {
+		header = fmt.Sprintf(" Charter v%s ", d.version)
+	}
+	fmt.Fprintf(d.output, "\n%s\n", styleHeader.Render(header))
 	if len(filled) > 0 {
 		fmt.Fprintf(d.output, "%s\n", styleDone.Render(fmt.Sprintf("  Already set: %s", strings.Join(filled, ", "))))
 	}
