@@ -574,7 +574,41 @@ func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req mod
 	if err != nil {
 		return "", err
 	}
-	return resp.Content, nil
+	return d.guardResponse(resp.Content), nil
+}
+
+func (d *Dialogue) guardResponse(content string) string {
+	lower := strings.ToLower(content)
+	forbiddenPatterns := []string{
+		"```",                    // code blocks
+		"here's how",          // tutorials
+		"for example",         // examples
+		"step 1",              // step-by-step
+		"# step",              // steps
+		"## ",                 // markdown headings (tutorials use these)
+	}
+	for _, p := range forbiddenPatterns {
+		if strings.Contains(lower, p) {
+			slog.Warn("LLM generated implementation content", "pattern", p, "truncating", true)
+			// Truncate at the start of the implementation content
+			idx := strings.Index(lower, p)
+			if idx > 0 {
+				return strings.TrimSpace(content[:idx])
+			}
+		}
+	}
+
+	// If response is very long, it's likely a tutorial
+	if len(content) > 1200 {
+		// Try to find the last question mark before the cutoff
+		lastQ := strings.LastIndex(content[:1200], "?")
+		if lastQ > 0 {
+			return strings.TrimSpace(content[:lastQ+1])
+		}
+		return content[:1200] + "\n[response truncated — LLM generated too much content]"
+	}
+
+	return content
 }
 
 func (d *Dialogue) sourceSummary() string {
