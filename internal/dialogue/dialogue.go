@@ -1,6 +1,7 @@
 package dialogue
 
 import (
+	"bufio"
 	"context"
 	_ "embed"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/helloodokai/charter/internal/charter"
@@ -487,15 +487,12 @@ func (d *Dialogue) askUser(ctx context.Context, question string) (string, error)
 	fmt.Fprintf(d.output, "\n%s\n", styleDim.Render("  Press Enter to skip, type \"done\" to finish"))
 	fmt.Fprintf(d.output, "%s ", styleAccent.Render("▸"))
 
-	var answer string
-	input := huh.NewInput().
-		Value(&answer).
-		CharLimit(4000)
-
-	form := huh.NewForm(huh.NewGroup(input))
-	if err := form.Run(); err != nil {
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
 		return "", fmt.Errorf("reading user input: %w", err)
 	}
+	answer := strings.TrimSpace(line)
 
 	d.transcript = append(d.transcript, charter.TranscriptTurn{
 		Role: "human", At: time.Now().UTC(), Content: answer,
@@ -672,16 +669,12 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 	cs := parseCounterSpec(content)
 	var kept []string
 	for _, m := range cs.Misinterpretations {
-		keep := false
 		fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render(fmt.Sprintf("Misinterpretation: %s", m)))
-		confirm := huh.NewConfirm().
-			Title("Keep this in the charter?").
-			Value(&keep)
-		if err := huh.NewForm(huh.NewGroup(confirm)).Run(); err != nil {
-			slog.Warn("counter-spec confirm failed", "error", err)
-			continue
-		}
-		if keep {
+		fmt.Fprintf(d.output, "%s ", styleAccent.Render("Keep this in the charter? (y/n):"))
+		reader := bufio.NewReader(os.Stdin)
+		line, _ := reader.ReadString('\n')
+		line = strings.TrimSpace(strings.ToLower(line))
+		if line == "y" || line == "yes" {
 			kept = append(kept, m)
 		}
 	}
