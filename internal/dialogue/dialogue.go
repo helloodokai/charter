@@ -131,6 +131,7 @@ type Dialogue struct {
 	resumeMode      bool
 	version         string
 	conversation    []chatTurn
+	skippedFields   map[fieldName]bool
 }
 
 type chatTurn struct {
@@ -165,6 +166,7 @@ func New(c *charter.Charter, router *routing.Router, cfg *config.Config, opts ..
 		routingStreamer:  router,
 		cfg:              cfg,
 		output:           os.Stderr,
+		skippedFields:    make(map[fieldName]bool),
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -266,13 +268,15 @@ func (d *Dialogue) runConversation(ctx context.Context) (*Result, error) {
 			return nil, fmt.Errorf("turn %d: asking user: %w", d.turn, err)
 		}
 
-		if strings.TrimSpace(strings.ToLower(answer)) == "done" {
-			break
-		}
-
-		if answer == "" {
+		if strings.TrimSpace(answer) == "" {
+			d.skippedFields[field] = true
+			fmt.Fprintf(d.output, "%s\n", styleDim.Render(fmt.Sprintf("  Skipped %s", fieldLabels[field])))
 			d.turn++
 			continue
+		}
+
+		if strings.TrimSpace(strings.ToLower(answer)) == "done" {
+			break
 		}
 
 		if err := d.extractField(ctx, field, answer); err != nil {
@@ -355,6 +359,9 @@ func (d *Dialogue) finalize(ctx context.Context) (*Result, error) {
 
 func (d *Dialogue) nextFieldToDiscuss() fieldName {
 	for _, field := range fieldOrder {
+		if d.skippedFields[field] {
+			continue
+		}
 		if !d.isFieldFilled(field) {
 			return field
 		}
@@ -477,15 +484,15 @@ func (d *Dialogue) askUser(ctx context.Context, question string) (string, error)
 		}
 	}
 
-	fmt.Fprintf(d.output, "\n%s\n", styleAccent.Render("Your response:"))
+	fmt.Fprintf(d.output, "\n%s\n", styleDim.Render("  Press Enter to skip, type \"done\" to finish"))
+	fmt.Fprintf(d.output, "%s ", styleAccent.Render("▸"))
 
 	var answer string
-	field := huh.NewText().
-		Title("Your response:").
+	input := huh.NewInput().
 		Value(&answer).
 		CharLimit(4000)
 
-	form := huh.NewForm(huh.NewGroup(field))
+	form := huh.NewForm(huh.NewGroup(input))
 	if err := form.Run(); err != nil {
 		return "", fmt.Errorf("reading user input: %w", err)
 	}
