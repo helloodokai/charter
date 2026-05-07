@@ -2,7 +2,6 @@ package dialogue
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -547,15 +546,16 @@ func (d *Dialogue) acknowledge(ctx context.Context, field fieldName, answer stri
 
 	fmt.Fprintf(d.output, "%s ", styleThink.Render("  Reviewing"))
 
-	resp, err := d.routingStreamer.Stream(ctx, models.Cheap, models.CompletionRequest{
+	sw := NewStreamingMarkdownWriter(d.output)
+	_, err := d.routingStreamer.Stream(ctx, models.Cheap, models.CompletionRequest{
 		System:   AcknowledgePrompt,
 		Messages: []models.Message{{Role: "user", Content: userMsg}},
-	}, d.output)
+	}, sw)
 	if err != nil {
 		return fmt.Errorf("acknowledge LLM call: %w", err)
 	}
 
-	content := strings.TrimSpace(resp.Content)
+	content := strings.TrimSpace(sw.Finish())
 	content = compactMarkdown(content)
 
 	if strings.Contains(content, "Got it, moving on") {
@@ -568,16 +568,15 @@ func (d *Dialogue) acknowledge(ctx context.Context, field fieldName, answer stri
 }
 
 func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (string, error) {
-	var buf bytes.Buffer
-	_, err := d.routingStreamer.Stream(ctx, tier, req, &buf)
+	sw := NewStreamingMarkdownWriter(d.output)
+	_, err := d.routingStreamer.Stream(ctx, tier, req, sw)
 	if err != nil {
 		return "", err
 	}
 
-	cleaned := d.guardResponse(buf.String())
-	rendered := renderMarkdown(cleaned)
-	fmt.Fprintf(d.output, "%s\n", rendered)
-	if len(cleaned) < len(buf.String())-10 {
+	raw := sw.Finish()
+	cleaned := d.guardResponse(raw)
+	if cleaned != raw {
 		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Response contained implementation content and was cleaned"))
 	}
 
@@ -726,19 +725,18 @@ func (d *Dialogue) synthesize(ctx context.Context) error {
 	summary := d.charterSummary()
 	synthCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	var buf bytes.Buffer
+	sw := NewStreamingMarkdownWriter(d.output)
 	_, err := d.routingStreamer.Stream(synthCtx, models.Mid, models.CompletionRequest{
 		System:   SynthesizePrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
-	}, &buf)
+	}, sw)
 	if err != nil {
 		return fmt.Errorf("synthesis: %w", err)
 	}
 
-	cleaned := d.guardResponse(buf.String())
-	rendered := renderMarkdown(cleaned)
-	fmt.Fprintf(d.output, "\n%s\n", rendered)
-	if len(cleaned) < len(buf.String())-10 {
+	raw := sw.Finish()
+	cleaned := d.guardResponse(raw)
+	if cleaned != raw {
 		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Synthesis contained implementation content and was cleaned"))
 	}
 
@@ -750,19 +748,18 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 	summary := d.charterSummary()
 	csCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	var buf bytes.Buffer
+	sw := NewStreamingMarkdownWriter(d.output)
 	_, err := d.routingStreamer.Stream(csCtx, models.Frontier, models.CompletionRequest{
 		System:   CounterSpecPrompt,
 		Messages: []models.Message{{Role: "user", Content: summary}},
-	}, &buf)
+	}, sw)
 	if err != nil {
 		return fmt.Errorf("counter-spec: %w", err)
 	}
 
-	content := d.guardResponse(buf.String())
-	rendered := renderMarkdown(content)
-	fmt.Fprintf(d.output, "\n%s\n", rendered)
-	if len(content) < len(buf.String())-10 {
+	raw := sw.Finish()
+	content := d.guardResponse(raw)
+	if content != raw {
 		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Counter-spec contained implementation content and was cleaned"))
 	}
 
