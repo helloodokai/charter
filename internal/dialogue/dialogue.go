@@ -51,6 +51,10 @@ var SynthesizePrompt string
 //go:embed prompts/counterspec.md
 var CounterSpecPrompt string
 
+// SpecPrompt is the embedded system prompt for generating SPEC.md from a charter and transcript.
+//go:embed prompts/spec.md
+var SpecPrompt string
+
 // ConversationPrompt is the embedded system prompt for the conversation-driven dialogue mode.
 //go:embed prompts/conversation.md
 var ConversationPrompt string
@@ -105,7 +109,7 @@ var fieldLabels = map[fieldName]string{
 	fieldRollback:    "Rollback Plan",
 }
 
-var fieldDescriptions = map[fieldName]string{
+var fieldDescriptions = map[fieldName]string{ //nolint:unused
 	fieldGoal:        "the one-sentence objective of this charter",
 	fieldContext:     "background information an outsider would need",
 	fieldNonGoals:    "what this charter explicitly does NOT cover",
@@ -259,8 +263,8 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 			break
 		}
 
-		fmt.Fprintf(d.output, "\n%s\n", styleField.Render(fmt.Sprintf("▸ %s", fieldLabels[field])))
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render(fmt.Sprintf("  Discussing %s — %s", fieldLabels[field], fieldDescriptions[field])))
+		fmt.Fprintf(d.output, "\n%s\n", styleDivider.Render("──────────────────────────────────────"))
+		fmt.Fprintf(d.output, "%s\n", styleField.Render(fmt.Sprintf("▸ %s", fieldLabels[field])))
 
 		question, err := d.generateFieldQuestion(ctx, field)
 		if err != nil {
@@ -279,7 +283,7 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 			continue
 		}
 
-		if strings.TrimSpace(strings.ToLower(answer)) == "done" {
+		if strings.TrimSpace(strings.ToLower(answer)) == "stop" {
 			break
 		}
 
@@ -296,7 +300,7 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 
 		filled := d.filledFields()
 		missing := d.missingFields()
-		fmt.Fprintf(d.output, "%s\n", styleDivider.Render("──────────────────────────────────────"))
+		fmt.Fprintf(d.output, "%s ", styleDim.Render("Progress:"))
 		if len(filled) > 0 {
 			fmt.Fprintf(d.output, "%s  ", styleDone.Render("✓"))
 		}
@@ -304,7 +308,7 @@ func (d *Dialogue) Run(ctx context.Context) (*Result, error) {
 		if len(missing) > 0 {
 			fmt.Fprintf(d.output, "  %s%s", styleDim.Render("⋯ "), strings.Join(missing, ", "))
 		}
-		fmt.Fprintf(d.output, "\n%s\n", styleDim.Render(fmt.Sprintf("  Turn %d/%d", d.turn, d.budget)))
+		fmt.Fprintf(d.output, "  %s\n", styleDim.Render(fmt.Sprintf("(%d/%d)", d.turn, d.budget)))
 	}
 
 	return d.finalize(ctx)
@@ -492,8 +496,8 @@ func (d *Dialogue) askUser(ctx context.Context, question string) (string, error)
 		}
 	}
 
-	fmt.Fprintf(d.output, "\n%s\n", styleDim.Render("  Press Enter to skip, type \"done\" to finish"))
-	fmt.Fprintf(d.output, "%s ", styleAccent.Render("▸"))
+	fmt.Fprintf(d.output, "  %s\n", question)
+	fmt.Fprintf(d.output, "\n%s ", styleAccent.Render("Your answer (Enter to skip this field, or type \"stop\" to end the interview):"))
 
 	reader := bufio.NewReader(os.Stdin)
 	line, err := reader.ReadString('\n')
@@ -544,7 +548,7 @@ func (d *Dialogue) acknowledge(ctx context.Context, field fieldName, answer stri
 	summary := d.charterSummary()
 	userMsg := fmt.Sprintf("Field: %s\nUser's answer: %s\n\nCurrent charter state:\n%s", fieldLabels[field], answer, summary)
 
-	fmt.Fprintf(d.output, "%s ", styleThink.Render("  Reviewing"))
+	fmt.Fprintf(d.output, "  %s ", styleThink.Render("Reviewing"))
 
 	sw := NewStreamingMarkdownWriter(d.output)
 	_, err := d.routingStreamer.Stream(ctx, models.Cheap, models.CompletionRequest{
@@ -552,14 +556,15 @@ func (d *Dialogue) acknowledge(ctx context.Context, field fieldName, answer stri
 		Messages: []models.Message{{Role: "user", Content: userMsg}},
 	}, sw)
 	if err != nil {
+		fmt.Fprintf(d.output, "\n")
 		return fmt.Errorf("acknowledge LLM call: %w", err)
 	}
 
-	content := strings.TrimSpace(sw.Finish())
-	content = compactMarkdown(content)
+	raw := sw.Finish()
+	content := strings.TrimSpace(compactMarkdown(raw))
 
 	if strings.Contains(content, "Got it, moving on") {
-		fmt.Fprintf(d.output, "\n%s\n", styleDone.Render("  ✓ Got it, moving on"))
+		fmt.Fprintf(d.output, "\n%s\n", styleDone.Render("  ✓ Got it"))
 		return nil
 	}
 
@@ -846,4 +851,112 @@ func (d *Dialogue) persistTranscript() {
 	if err := d.charter.Save(d.chartersDir); err != nil {
 		slog.Warn("failed to persist transcript", "error", err)
 	}
+}
+
+// GenerateSpec produces a SPEC.md from a charter and its transcript using the Frontier-tier model.
+// The caller is responsible for saving the result.
+func GenerateSpec(ctx context.Context, c *charter.Charter, transcriptContent string, rs routerStreamer, output io.Writer) (string, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "CHARTER:\n\n")
+	fmt.Fprintf(&b, "Goal: %s\n", c.Goal)
+	if c.Context != "" {
+		fmt.Fprintf(&b, "Context: %s\n", c.Context)
+	}
+	if len(c.NonGoals) > 0 {
+		b.WriteString("Non-goals:\n")
+		for _, ng := range c.NonGoals {
+			fmt.Fprintf(&b, "- %s\n", ng)
+		}
+	}
+	if len(c.AcceptanceCriteria) > 0 {
+		b.WriteString("Acceptance criteria:\n")
+		for _, ac := range c.AcceptanceCriteria {
+			fmt.Fprintf(&b, "- %s (verification: %s)\n", ac.Statement, ac.Verification)
+		}
+	}
+	if len(c.EdgeCases) > 0 {
+		b.WriteString("Edge cases:\n")
+		for _, ec := range c.EdgeCases {
+			fmt.Fprintf(&b, "- %s\n", ec)
+		}
+	}
+	if len(c.Constraints.Performance) > 0 || len(c.Constraints.Security) > 0 || len(c.Constraints.Compatibility) > 0 || len(c.Constraints.Style) > 0 || len(c.Constraints.Dependencies) > 0 {
+		b.WriteString("Constraints:\n")
+		for _, p := range c.Constraints.Performance {
+			fmt.Fprintf(&b, "- performance: %s\n", p)
+		}
+		for _, s := range c.Constraints.Security {
+			fmt.Fprintf(&b, "- security: %s\n", s)
+		}
+		for _, cp := range c.Constraints.Compatibility {
+			fmt.Fprintf(&b, "- compatibility: %s\n", cp)
+		}
+		for _, st := range c.Constraints.Style {
+			fmt.Fprintf(&b, "- style: %s\n", st)
+		}
+		for _, dp := range c.Constraints.Dependencies {
+			fmt.Fprintf(&b, "- dependencies: %s\n", dp)
+		}
+	}
+	if len(c.BlastRadius.Files) > 0 || len(c.BlastRadius.Services) > 0 || len(c.BlastRadius.Data) > 0 {
+		b.WriteString("Blast radius:\n")
+		if len(c.BlastRadius.Files) > 0 {
+			fmt.Fprintf(&b, "  Files: %s\n", strings.Join(c.BlastRadius.Files, ", "))
+		}
+		if len(c.BlastRadius.Services) > 0 {
+			fmt.Fprintf(&b, "  Services: %s\n", strings.Join(c.BlastRadius.Services, ", "))
+		}
+		if len(c.BlastRadius.Data) > 0 {
+			fmt.Fprintf(&b, "  Data: %s\n", strings.Join(c.BlastRadius.Data, ", "))
+		}
+	}
+	if len(c.Unknowns) > 0 {
+		b.WriteString("Open questions:\n")
+		for _, u := range c.Unknowns {
+			blocking := "no"
+			if u.Blocking {
+				blocking = "yes"
+			}
+			fmt.Fprintf(&b, "- %s (blocking: %s)\n", u.Question, blocking)
+		}
+	}
+	if c.Risk != "" {
+		fmt.Fprintf(&b, "Risk: %s\n", c.Risk)
+	}
+	if c.RiskRationale != "" {
+		fmt.Fprintf(&b, "Risk rationale: %s\n", c.RiskRationale)
+	}
+	if c.RollbackPlan != "" {
+		fmt.Fprintf(&b, "Rollback plan: %s\n", c.RollbackPlan)
+	}
+	if len(c.CounterSpec.Misinterpretations) > 0 {
+		b.WriteString("Counter-spec misinterpretations:\n")
+		for _, m := range c.CounterSpec.Misinterpretations {
+			fmt.Fprintf(&b, "- %s\n", m)
+		}
+	}
+	if len(c.CounterSpec.AmbiguitiesFlagged) > 0 {
+		b.WriteString("Counter-spec ambiguities:\n")
+		for _, a := range c.CounterSpec.AmbiguitiesFlagged {
+			fmt.Fprintf(&b, "- %s\n", a)
+		}
+	}
+
+	if transcriptContent != "" {
+		fmt.Fprintf(&b, "\n---\n\nTRANSCRIPT (the Socratic dialogue that produced this charter):\n\n%s\n", transcriptContent)
+	}
+
+	specCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	sw := NewStreamingMarkdownWriter(output)
+	_, err := rs.Stream(specCtx, models.Frontier, models.CompletionRequest{
+		System:   SpecPrompt,
+		Messages: []models.Message{{Role: "user", Content: b.String()}},
+	}, sw)
+	if err != nil {
+		return "", fmt.Errorf("spec generation: %w", err)
+	}
+
+	return sw.Finish(), nil
 }

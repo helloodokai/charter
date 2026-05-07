@@ -115,6 +115,11 @@ func runDraft(cmd *cobra.Command, args []string) error {
 
 	if draftNoTranscript {
 		result.Charter.Transcript = nil
+	} else if len(result.Charter.Transcript) > 0 {
+		if tErr := charter.SaveTranscript(chartersDir, result.Charter); tErr != nil {
+			fmt.Fprintln(os.Stderr, "Warning: failed to save transcript:", tErr)
+		}
+		result.Charter.Transcript = nil
 	}
 
 	if draftOut != "" {
@@ -130,6 +135,9 @@ func runDraft(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(os.Stderr, "Warning: failed to update index:", idxErr)
 		}
 		fmt.Fprintf(os.Stderr, "Charter saved: .charters/%s.yaml\n", result.Charter.ID)
+		if result.Charter.TranscriptFile != "" {
+			fmt.Fprintf(os.Stderr, "Transcript:  .charters/%s\n", result.Charter.TranscriptFile)
+		}
 	}
 
 	return nil

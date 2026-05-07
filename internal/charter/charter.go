@@ -104,7 +104,9 @@ type Charter struct {
 	Risk                Risk                  `yaml:"risk"           json:"risk"`
 	RiskRationale       string                `yaml:"risk_rationale" json:"risk_rationale"`
 	Status              Status                `yaml:"status"         json:"status"`
-	Transcript           []TranscriptTurn      `yaml:"transcript,omitempty" json:"transcript,omitempty"`
+	Transcript      []TranscriptTurn `yaml:"transcript,omitempty" json:"transcript,omitempty"`
+	TranscriptFile  string           `yaml:"transcript_file,omitempty" json:"transcript_file,omitempty"`
+	SpecFile        string           `yaml:"spec_file,omitempty" json:"spec_file,omitempty"`
 }
 
 // New creates a new Charter in draft status with the given goal, source, and author.
@@ -136,12 +138,19 @@ func Load(path string) (*Charter, error) {
 }
 
 // Save writes the Charter as a YAML file in the given directory, using the charter ID as the filename.
+// If TranscriptFile is set, the transcript is stored externally and omitted from the YAML.
 func (c *Charter) Save(dir string) error {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating charters dir: %w", err)
 	}
 	path := filepath.Join(dir, c.ID+".yaml")
-	data, err := yaml.Marshal(c)
+
+	saveCharter := *c
+	if saveCharter.TranscriptFile != "" {
+		saveCharter.Transcript = nil
+	}
+
+	data, err := yaml.Marshal(&saveCharter)
 	if err != nil {
 		return fmt.Errorf("marshalling charter: %w", err)
 	}
