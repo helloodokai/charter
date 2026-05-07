@@ -52,11 +52,22 @@ charter draft --issue https://github.com/your-org/your-repo/issues/42
 charter draft --from requirements.md
 ```
 
-CHARTER runs an **interactive Socratic dialogue** — it asks you one question at a time, proposes answers based on context, and progressively hardens the spec until it's tight enough to hand to a coding agent.
+After drafting a charter, generate a spec for your coding agent:
 
-When the dialogue finishes, you get a `charter.yaml` file in `.charters/`:
+```bash
+# Generate an agent-consumable SPEC.md from the latest charter
+charter spec
+
+# Or write it to your project root for easy access
+charter spec --out SPEC.md
+```
+
+CHARTER runs an **interactive Socratic dialogue** — it asks you one question per field, you answer in your own words, and the system progressively hardens the spec. Press Enter to skip a field, or type `stop` to end the interview early. When the dialogue finishes, a synthesis pass consolidates your answers and a counter-spec review flags ambiguities.
+
+When the dialogue finishes, you get a charter YAML and a human-readable transcript in `.charters/`:
 
 ```yaml
+# .charters/ch-2026-05-04-a1b2c3.yaml
 schema_version: "1"
 id: ch-2026-05-04-a1b2c3
 created_at: 2026-05-04T12:00:00Z
@@ -89,7 +100,13 @@ constraints:
 risk: medium
 risk_rationale: Touches public API surface but scoped to one concern
 status: ready
+transcript_file: ch-2026-05-04-a1b2c3.transcript.md
+spec_file: ch-2026-05-04-a1b2c3.spec.md
 ```
+
+The **transcript** (`.transcript.md`) is a full Markdown record of the Socratic dialogue — every question and answer, timestamped and labelled. It's useful for auditing how the charter was formed, and it feeds directly into spec generation.
+
+The **spec** (`.spec.md`) is an agent-consumable specification generated from the charter + transcript (see `charter spec` below).
 
 ## Setting up OLLAMA_API_KEY
 
@@ -115,7 +132,8 @@ charter doctor
 
 ```
 charter init
-charter draft [goal] [--issue URL] [--from FILE] [--stdin] [--out PATH] [--non-interactive] [--turn-budget N] [--profile cloud|local] [--resume ID]
+charter draft [goal] [--issue URL] [--from FILE] [--stdin] [--out PATH] [--non-interactive] [--turn-budget N] [--profile cloud|local] [--resume ID] [--no-transcript]
+charter spec [charter-id] [--out PATH] [--profile cloud|local]
 charter validate <charter.yaml>
 charter conformance <charter.yaml> --diff REF..REF [--format json|md|both] [--out PATH]
 charter ls [--status draft|ready|approved|archived]
@@ -146,7 +164,43 @@ If no source is provided, you'll be prompted to describe your goal.
 | `--turn-budget N` | Override default turn budget (default: 8) |
 | `--profile cloud\|local` | Model profile to use |
 | `--resume ID` | Resume an interrupted dialogue |
-| `--no-transcript` | Omit transcript from output |
+| `--no-transcript` | Omit transcript from output (no `.transcript.md` saved) |
+
+### `charter spec`
+
+The killer feature. Generates a complete, unambiguous **SPEC.md** that an autonomous coding agent can execute without any additional human context.
+
+```bash
+# Generate a spec from the most recent charter
+charter spec
+
+# Generate a spec from a specific charter
+charter spec ch-2026-05-04-abc123
+
+# Write to a custom path (e.g. your project root)
+charter spec --out SPEC.md
+```
+
+The spec is produced by synthesizing the charter YAML together with the Socratic dialogue transcript, so it captures nuances and clarifications that the structured fields alone might miss. It uses the Frontier-tier model for the highest quality output.
+
+The spec includes:
+- **Overview** — what and why, in the human's own words
+- **Functional Requirements** — numbered, using RFC 2119 language (MUST/SHOULD/MAY)
+- **Non-Functional Requirements** — performance, security, compatibility constraints
+- **Acceptance Criteria** — each with a pass/fail verification method
+- **Scope** — explicit in-scope and out-of-scope boundaries
+- **Boundaries** — affected files, services, and data
+- **Edge Cases** — with expected behavior
+- **Open Questions** — blocking status and resolution needs
+- **Risk Assessment** — level, rationale, rollback plan
+- **Counter-Spec Resolution** — how ambiguities are resolved in this spec
+
+The spec is saved as `.charters/<id>.spec.md` and referenced from the charter's `spec_file` field.
+
+| Flag | Description |
+|------|-------------|
+| `[charter-id]` | Charter to generate spec from (defaults to most recent) |
+| `--out PATH` | Write spec to a custom path |
 
 ### `charter validate`
 
@@ -215,8 +269,8 @@ The reusable workflow at `.github/workflows/charter.yml` runs `charter draft --i
 CHARTER and `acig` are siblings in the same pipeline:
 
 ```
-  Issue ──► CHARTER ──► charter.yaml ──► Agent ──► PR ──► acig
-           (harden)     (contract)      (code)    (diff)  (verify)
+  Issue ──► CHARTER ──► charter.yaml + spec.md ──► Agent ──► PR ──► acig
+           (harden)     (contract + spec)          (code)    (diff)  (verify)
 ```
 
 In `acig`, reference a charter in your PR body or commit message:
@@ -245,6 +299,8 @@ The schema is versioned (`schema_version: "1"`). Key fields:
 | `counter_spec` | Ways an agent could misinterpret the goal |
 | `risk` | low / medium / high / critical |
 | `status` | draft / ready / approved / archived |
+| `transcript_file` | Path to the `.transcript.md` dialogue record |
+| `spec_file` | Path to the generated `.spec.md` agent specification |
 
 ## For AI agents consuming charters
 
@@ -257,6 +313,8 @@ If you're building an agent that reads `charter.yaml`, here's what to focus on:
 5. **`unknowns`** with `blocking: true` must be resolved before work starts.
 6. **`counter_spec`** documents known misinterpretation risks — read these before starting.
 7. **`constraints`** are non-negotiable. Violating them fails conformance.
+8. **If `spec_file` is set**, read the `.spec.md` file — it contains the full agent-consumable specification with resolved ambiguities, RFC 2119 language, and testable requirements. It's more detailed and less ambiguous than the charter YAML alone.
+9. **If `transcript_file` is set**, the `.transcript.md` file contains the original Socratic dialogue. Use it for context on intent, but the spec file takes precedence.
 
 The JSON schema is available at `schema/charter.schema.json` or via `charter schema`.
 
