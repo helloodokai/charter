@@ -55,6 +55,10 @@ var CounterSpecPrompt string
 //go:embed prompts/spec.md
 var SpecPrompt string
 
+// FinalizePrompt is the embedded system prompt for synthesizing a complete charter from the transcript.
+//go:embed prompts/finalize.md
+var FinalizePrompt string
+
 // ConversationPrompt is the embedded system prompt for the conversation-driven dialogue mode.
 //go:embed prompts/conversation.md
 var ConversationPrompt string
@@ -333,16 +337,28 @@ func (d *Dialogue) runNonInteractive(ctx context.Context) (*Result, error) {
 
 func (d *Dialogue) finalize(ctx context.Context) (*Result, error) {
 	fmt.Fprintf(d.output, "\n%s ", styleThink.Render("Synthesizing charter"))
-	synthResult, synthErr := d.synthesize(ctx)
-	if synthErr != nil {
-		fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render("⚠ Synthesis had issues, charter may be incomplete"))
-		slog.Warn("synthesis failed", "error", synthErr)
-	} else {
-		fmt.Fprintf(d.output, "%s\n", styleDim.Render("done."))
-		d.enhanceFromSynthesis(synthResult)
-		d.transcript = append(d.transcript, charter.TranscriptTurn{
-			Role: "tool", At: time.Now().UTC(), Content: synthResult,
-		})
+
+	transcript := charter.FormatTranscript(&charter.Charter{Transcript: d.transcript, Goal: d.charter.Goal, ID: d.charter.ID, CreatedAt: d.charter.CreatedAt, Authors: d.charter.Authors, Source: d.charter.Source})
+
+	if transcript != "" {
+		finCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		sw := NewStreamingMarkdownWriter(d.output)
+		_, err := d.routingStreamer.Stream(finCtx, models.Frontier, models.CompletionRequest{
+			System:   FinalizePrompt,
+			Messages: []models.Message{{Role: "user", Content: transcript}},
+		}, sw)
+		if err != nil {
+			fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render("⚠ Finalization failed, keeping raw fields"))
+			slog.Warn("finalization failed", "error", err)
+		} else {
+			fmt.Fprintf(d.output, "%s\n", styleDim.Render("done."))
+			result := sw.Finish()
+			d.applyFinalizedCharter(result)
+			d.transcript = append(d.transcript, charter.TranscriptTurn{
+				Role: "tool", At: time.Now().UTC(), Content: result,
+			})
+		}
 	}
 
 	if d.cfg.Dialogue.RequireCounterSpec {
@@ -739,7 +755,7 @@ func (d *Dialogue) charterSummary() string {
 	return b.String()
 }
 
-func (d *Dialogue) synthesize(ctx context.Context) (string, error) {
+func (d *Dialogue) synthesize(ctx context.Context) (string, error) { //nolint:unused
 	summary := d.charterSummary()
 	synthCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -803,32 +819,30 @@ func (d *Dialogue) counterspec(ctx context.Context) (string, error) {
 	return content, nil
 }
 
-func (d *Dialogue) enhanceFromSynthesis(synthesis string) {
+func (d *Dialogue) applyFinalizedCharter(synthesis string) {
 	if synthesis == "" {
 		return
 	}
 
-	synthGoal := extractSynthSection(synthesis, "GOAL")
-	synthContext := extractSynthSection(synthesis, "CONTEXT")
-	synthNonGoals := extractSynthList(synthesis, "NON_GOALS")
-	synthAC := extractSynthList(synthesis, "ACCEPTANCE_CRITERIA")
-	synthEdgeCases := extractSynthList(synthesis, "EDGE_CASES")
-	synthRisk := extractSynthSection(synthesis, "RISK")
-	synthRiskRationale := extractSynthSection(synthesis, "RISK_RATIONALE")
-	synthRollback := extractSynthSection(synthesis, "ROLLBACK_PLAN")
+	goal := extractSynthSection(synthesis, "GOAL")
+	if goal != "" {
+		d.charter.Goal = goal
+	}
 
-	if synthGoal != "" && (d.charter.Goal == "" || len(d.charter.Goal) < len(synthGoal)) {
-		d.charter.Goal = synthGoal
+	context := extractSynthSection(synthesis, "CONTEXT")
+	if context != "" {
+		d.charter.Context = context
 	}
-	if synthContext != "" && (d.charter.Context == "" || len(d.charter.Context) < len(synthContext)) {
-		d.charter.Context = synthContext
+
+	nonGoals := extractSynthList(synthesis, "NON_GOALS")
+	if len(nonGoals) > 0 {
+		d.charter.NonGoals = nonGoals
 	}
-	if len(synthNonGoals) > 0 && len(d.charter.NonGoals) < len(synthNonGoals) {
-		d.charter.NonGoals = synthNonGoals
-	}
-	if len(synthAC) > 0 && len(d.charter.AcceptanceCriteria) < len(synthAC) {
+
+	acLines := extractSynthList(synthesis, "ACCEPTANCE_CRITERIA")
+	if len(acLines) > 0 {
 		var acs []charter.AcceptanceCriterion
-		for i, s := range synthAC {
+		for i, s := range acLines {
 			verification := "test"
 			lower := strings.ToLower(s)
 			if strings.Contains(lower, "manual") {
@@ -836,19 +850,68 @@ func (d *Dialogue) enhanceFromSynthesis(synthesis string) {
 			} else if strings.Contains(lower, "metric") {
 				verification = "metric"
 			}
+			statement := s
+			if idx := strings.Index(lower, "(verification:"); idx != -1 {
+				statement = strings.TrimSpace(s[:idx])
+			}
+			if idx := strings.Index(lower, "( test)"); idx != -1 {
+				statement = strings.TrimSpace(s[:idx])
+			}
 			acs = append(acs, charter.AcceptanceCriterion{
 				ID:           fmt.Sprintf("ac-%d", i+1),
-				Statement:    s,
+				Statement:    statement,
 				Verification: verification,
 			})
 		}
 		d.charter.AcceptanceCriteria = acs
 	}
-	if len(synthEdgeCases) > 0 && len(d.charter.EdgeCases) < len(synthEdgeCases) {
-		d.charter.EdgeCases = synthEdgeCases
+
+	edgeCases := extractSynthList(synthesis, "EDGE_CASES")
+	if len(edgeCases) > 0 {
+		var cases []string
+		for _, ec := range edgeCases {
+			if !strings.Contains(strings.ToLower(ec), "not discussed") && !strings.Contains(strings.ToLower(ec), "none") {
+				cases = append(cases, ec)
+			}
+		}
+		d.charter.EdgeCases = cases
 	}
-	if synthRisk != "" && d.charter.Risk == "" {
-		lower := strings.ToLower(synthRisk)
+
+	constraints := parseConstraints(synthesis)
+	if len(constraints.Performance) > 0 {
+		filtered := filterNotDiscussed(constraints.Performance)
+		if len(filtered) > 0 {
+			d.charter.Constraints.Performance = filtered
+		}
+	}
+	if len(constraints.Security) > 0 {
+		filtered := filterNotDiscussed(constraints.Security)
+		if len(filtered) > 0 {
+			d.charter.Constraints.Security = filtered
+		}
+	}
+	if len(constraints.Compatibility) > 0 {
+		filtered := filterNotDiscussed(constraints.Compatibility)
+		if len(filtered) > 0 {
+			d.charter.Constraints.Compatibility = filtered
+		}
+	}
+	if len(constraints.Style) > 0 {
+		filtered := filterNotDiscussed(constraints.Style)
+		if len(filtered) > 0 {
+			d.charter.Constraints.Style = filtered
+		}
+	}
+	if len(constraints.Dependencies) > 0 {
+		filtered := filterNotDiscussed(constraints.Dependencies)
+		if len(filtered) > 0 {
+			d.charter.Constraints.Dependencies = filtered
+		}
+	}
+
+	risk := extractSynthSection(synthesis, "RISK")
+	if risk != "" {
+		lower := strings.ToLower(risk)
 		switch {
 		case strings.Contains(lower, "critical"):
 			d.charter.Risk = charter.RiskCritical
@@ -860,12 +923,27 @@ func (d *Dialogue) enhanceFromSynthesis(synthesis string) {
 			d.charter.Risk = charter.RiskLow
 		}
 	}
-	if synthRiskRationale != "" && d.charter.RiskRationale == "" {
-		d.charter.RiskRationale = synthRiskRationale
+
+	rationale := extractSynthSection(synthesis, "RISK_RATIONALE")
+	if rationale != "" && !strings.Contains(strings.ToLower(rationale), "not discussed") {
+		d.charter.RiskRationale = rationale
 	}
-	if synthRollback != "" && d.charter.RollbackPlan == "" {
-		d.charter.RollbackPlan = synthRollback
+
+	rollback := extractSynthSection(synthesis, "ROLLBACK_PLAN")
+	if rollback != "" && !strings.Contains(strings.ToLower(rollback), "not discussed") {
+		d.charter.RollbackPlan = rollback
 	}
+}
+
+func filterNotDiscussed(items []string) []string {
+	var filtered []string
+	for _, item := range items {
+		lower := strings.ToLower(item)
+		if !strings.Contains(lower, "not discussed") && !strings.Contains(lower, "none identified") && !strings.Contains(lower, "not specified") {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 func extractSynthSection(text, header string) string {
