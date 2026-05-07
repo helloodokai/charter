@@ -547,40 +547,37 @@ func (d *Dialogue) acknowledge(ctx context.Context, field fieldName, answer stri
 
 	fmt.Fprintf(d.output, "%s ", styleThink.Render("  Reviewing"))
 
-	resp, err := d.routingStreamer.Complete(ctx, models.Cheap, models.CompletionRequest{
+	resp, err := d.routingStreamer.Stream(ctx, models.Cheap, models.CompletionRequest{
 		System:   AcknowledgePrompt,
 		Messages: []models.Message{{Role: "user", Content: userMsg}},
-	})
+	}, d.output)
 	if err != nil {
 		return fmt.Errorf("acknowledge LLM call: %w", err)
 	}
 
 	content := strings.TrimSpace(resp.Content)
+	content = compactMarkdown(content)
 
 	if strings.Contains(content, "Got it, moving on") {
-		fmt.Fprintf(d.output, "%s\n", styleDone.Render("✓"))
+		fmt.Fprintf(d.output, "\n%s\n", styleDone.Render("  ✓ Got it, moving on"))
 		return nil
 	}
 
-	fmt.Fprintf(d.output, "\n%s\n", styleAccent.Render(content))
+	fmt.Fprintf(d.output, "\n")
 	return nil
 }
 
 func (d *Dialogue) streamComplete(ctx context.Context, tier models.Tier, req models.CompletionRequest) (string, error) {
-	resp, err := d.routingStreamer.Stream(ctx, tier, req, io.Discard)
+	var buf bytes.Buffer
+	_, err := d.routingStreamer.Stream(ctx, tier, req, &buf)
 	if err != nil {
 		return "", err
 	}
 
-	// Print a brief loading indicator
-	fmt.Fprintf(d.output, "  ")
-
-	cleaned := d.guardResponse(resp.Content)
-	fmt.Fprintf(d.output, "%s", cleaned)
-	fmt.Fprintf(d.output, "\n\n")
-
-	// Show truncation warning if content was stripped
-	if len(cleaned) < len(resp.Content)-10 {
+	cleaned := d.guardResponse(buf.String())
+	rendered := renderMarkdown(cleaned)
+	fmt.Fprintf(d.output, "%s\n", rendered)
+	if len(cleaned) < len(buf.String())-10 {
 		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Response contained implementation content and was cleaned"))
 	}
 
@@ -739,7 +736,8 @@ func (d *Dialogue) synthesize(ctx context.Context) error {
 	}
 
 	cleaned := d.guardResponse(buf.String())
-	fmt.Fprintf(d.output, "\n%s\n", cleaned)
+	rendered := renderMarkdown(cleaned)
+	fmt.Fprintf(d.output, "\n%s\n", rendered)
 	if len(cleaned) < len(buf.String())-10 {
 		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Synthesis contained implementation content and was cleaned"))
 	}
@@ -762,7 +760,8 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 	}
 
 	content := d.guardResponse(buf.String())
-	fmt.Fprintf(d.output, "\n%s\n", content)
+	rendered := renderMarkdown(content)
+	fmt.Fprintf(d.output, "\n%s\n", rendered)
 	if len(content) < len(buf.String())-10 {
 		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Counter-spec contained implementation content and was cleaned"))
 	}
