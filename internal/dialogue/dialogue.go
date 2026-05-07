@@ -333,20 +333,29 @@ func (d *Dialogue) runNonInteractive(ctx context.Context) (*Result, error) {
 
 func (d *Dialogue) finalize(ctx context.Context) (*Result, error) {
 	fmt.Fprintf(d.output, "\n%s ", styleThink.Render("Synthesizing charter"))
-	if err := d.synthesize(ctx); err != nil {
+	synthResult, synthErr := d.synthesize(ctx)
+	if synthErr != nil {
 		fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render("⚠ Synthesis had issues, charter may be incomplete"))
-		slog.Warn("synthesis failed", "error", err)
+		slog.Warn("synthesis failed", "error", synthErr)
 	} else {
 		fmt.Fprintf(d.output, "%s\n", styleDim.Render("done."))
+		d.enhanceFromSynthesis(synthResult)
+		d.transcript = append(d.transcript, charter.TranscriptTurn{
+			Role: "tool", At: time.Now().UTC(), Content: synthResult,
+		})
 	}
 
 	if d.cfg.Dialogue.RequireCounterSpec {
 		fmt.Fprintf(d.output, "\n%s ", styleThink.Render("Running counter-spec review"))
-		if err := d.counterspec(ctx); err != nil {
+		csResult, csErr := d.counterspec(ctx)
+		if csErr != nil {
 			fmt.Fprintf(d.output, "\n%s\n", styleWarn.Render("⚠ Counter-spec pass failed"))
-			slog.Warn("counter-spec pass failed", "error", err)
+			slog.Warn("counter-spec pass failed", "error", csErr)
 		} else {
 			fmt.Fprintf(d.output, "%s\n", styleDim.Render("done."))
+			d.transcript = append(d.transcript, charter.TranscriptTurn{
+				Role: "tool", At: time.Now().UTC(), Content: csResult,
+			})
 		}
 	}
 
@@ -563,6 +572,10 @@ func (d *Dialogue) acknowledge(ctx context.Context, field fieldName, answer stri
 	raw := sw.Finish()
 	content := strings.TrimSpace(compactMarkdown(raw))
 
+	d.transcript = append(d.transcript, charter.TranscriptTurn{
+		Role: "tool", At: time.Now().UTC(), Content: content,
+	})
+
 	if strings.Contains(content, "Got it, moving on") {
 		fmt.Fprintf(d.output, "\n%s\n", styleDone.Render("  ✓ Got it"))
 		return nil
@@ -726,7 +739,7 @@ func (d *Dialogue) charterSummary() string {
 	return b.String()
 }
 
-func (d *Dialogue) synthesize(ctx context.Context) error {
+func (d *Dialogue) synthesize(ctx context.Context) (string, error) {
 	summary := d.charterSummary()
 	synthCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -736,7 +749,7 @@ func (d *Dialogue) synthesize(ctx context.Context) error {
 		Messages: []models.Message{{Role: "user", Content: summary}},
 	}, sw)
 	if err != nil {
-		return fmt.Errorf("synthesis: %w", err)
+		return "", fmt.Errorf("synthesis: %w", err)
 	}
 
 	raw := sw.Finish()
@@ -745,11 +758,10 @@ func (d *Dialogue) synthesize(ctx context.Context) error {
 		fmt.Fprintf(d.output, "%s\n", styleWarn.Render("  ⚠ Synthesis contained implementation content and was cleaned"))
 	}
 
-	d.enhanceFromSynthesis(cleaned)
-	return nil
+	return cleaned, nil
 }
 
-func (d *Dialogue) counterspec(ctx context.Context) error {
+func (d *Dialogue) counterspec(ctx context.Context) (string, error) {
 	summary := d.charterSummary()
 	csCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -759,7 +771,7 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 		Messages: []models.Message{{Role: "user", Content: summary}},
 	}, sw)
 	if err != nil {
-		return fmt.Errorf("counter-spec: %w", err)
+		return "", fmt.Errorf("counter-spec: %w", err)
 	}
 
 	raw := sw.Finish()
@@ -770,7 +782,7 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 
 	if d.nonInteractive {
 		d.charter.CounterSpec = parseCounterSpec(content)
-		return nil
+		return content, nil
 	}
 
 	cs := parseCounterSpec(content)
@@ -788,10 +800,140 @@ func (d *Dialogue) counterspec(ctx context.Context) error {
 
 	d.charter.CounterSpec.Misinterpretations = kept
 	d.charter.CounterSpec.AmbiguitiesFlagged = cs.AmbiguitiesFlagged
-	return nil
+	return content, nil
 }
 
 func (d *Dialogue) enhanceFromSynthesis(synthesis string) {
+	if synthesis == "" {
+		return
+	}
+
+	synthGoal := extractSynthSection(synthesis, "GOAL")
+	synthContext := extractSynthSection(synthesis, "CONTEXT")
+	synthNonGoals := extractSynthList(synthesis, "NON_GOALS")
+	synthAC := extractSynthList(synthesis, "ACCEPTANCE_CRITERIA")
+	synthEdgeCases := extractSynthList(synthesis, "EDGE_CASES")
+	synthRisk := extractSynthSection(synthesis, "RISK")
+	synthRiskRationale := extractSynthSection(synthesis, "RISK_RATIONALE")
+	synthRollback := extractSynthSection(synthesis, "ROLLBACK_PLAN")
+
+	if synthGoal != "" && (d.charter.Goal == "" || len(d.charter.Goal) < len(synthGoal)) {
+		d.charter.Goal = synthGoal
+	}
+	if synthContext != "" && (d.charter.Context == "" || len(d.charter.Context) < len(synthContext)) {
+		d.charter.Context = synthContext
+	}
+	if len(synthNonGoals) > 0 && len(d.charter.NonGoals) < len(synthNonGoals) {
+		d.charter.NonGoals = synthNonGoals
+	}
+	if len(synthAC) > 0 && len(d.charter.AcceptanceCriteria) < len(synthAC) {
+		var acs []charter.AcceptanceCriterion
+		for i, s := range synthAC {
+			verification := "test"
+			lower := strings.ToLower(s)
+			if strings.Contains(lower, "manual") {
+				verification = "manual"
+			} else if strings.Contains(lower, "metric") {
+				verification = "metric"
+			}
+			acs = append(acs, charter.AcceptanceCriterion{
+				ID:           fmt.Sprintf("ac-%d", i+1),
+				Statement:    s,
+				Verification: verification,
+			})
+		}
+		d.charter.AcceptanceCriteria = acs
+	}
+	if len(synthEdgeCases) > 0 && len(d.charter.EdgeCases) < len(synthEdgeCases) {
+		d.charter.EdgeCases = synthEdgeCases
+	}
+	if synthRisk != "" && d.charter.Risk == "" {
+		lower := strings.ToLower(synthRisk)
+		switch {
+		case strings.Contains(lower, "critical"):
+			d.charter.Risk = charter.RiskCritical
+		case strings.Contains(lower, "high"):
+			d.charter.Risk = charter.RiskHigh
+		case strings.Contains(lower, "medium"):
+			d.charter.Risk = charter.RiskMedium
+		default:
+			d.charter.Risk = charter.RiskLow
+		}
+	}
+	if synthRiskRationale != "" && d.charter.RiskRationale == "" {
+		d.charter.RiskRationale = synthRiskRationale
+	}
+	if synthRollback != "" && d.charter.RollbackPlan == "" {
+		d.charter.RollbackPlan = synthRollback
+	}
+}
+
+func extractSynthSection(text, header string) string {
+	upper := strings.ToUpper(text)
+	prefix := header + ":"
+	idx := strings.Index(upper, prefix)
+	if idx == -1 {
+		return ""
+	}
+	after := text[idx+len(prefix):]
+	if len(after) > 0 && after[0] == ':' {
+		after = after[1:]
+	}
+	after = strings.TrimSpace(after)
+
+	lines := strings.Split(after, "\n")
+	var content []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || isAllUpperWithColon(trimmed) {
+			break
+		}
+		content = append(content, line)
+	}
+	result := strings.TrimSpace(strings.Join(content, " "))
+	if len(result) > 500 {
+		result = result[:500]
+	}
+	return result
+}
+
+func extractSynthList(text, header string) []string {
+	upper := strings.ToUpper(text)
+	prefix := header + ":"
+	idx := strings.Index(upper, prefix)
+	if idx == -1 {
+		return nil
+	}
+	after := text[idx+len(prefix):]
+	if len(after) > 0 && after[0] == ':' {
+		after = after[1:]
+	}
+
+	var items []string
+	for _, line := range strings.Split(after, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if isAllUpperWithColon(trimmed) {
+			break
+		}
+		trimmed = strings.TrimPrefix(trimmed, "- ")
+		trimmed = strings.TrimPrefix(trimmed, "* ")
+		trimmed = strings.TrimSpace(trimmed)
+		if trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	return items
+}
+
+func isAllUpperWithColon(s string) bool {
+	if !strings.Contains(s, ":") {
+		return false
+	}
+	parts := strings.SplitN(s, ":", 2)
+	return strings.ToUpper(parts[0]) == parts[0] && len(parts[0]) > 2
 }
 
 func (d *Dialogue) askAcceptanceCriteria(ctx context.Context, charterSummary string) (string, error) { //nolint:unused
