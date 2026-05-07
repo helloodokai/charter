@@ -159,11 +159,18 @@ func Load(path string) (*Config, error) {
 }
 
 // FindAndLoad searches standard paths for a config file and loads it, or returns defaults.
+// It checks in order: repo-level .charter.toml, repo-level charter.toml,
+// then user-level ~/.charter/.charter.toml.
 func FindAndLoad(repoRoot string) (*Config, error) {
 	paths := []string{
 		filepath.Join(repoRoot, ".charter.toml"),
 		filepath.Join(repoRoot, "charter.toml"),
 	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, ".charter", ".charter.toml"))
+	}
+
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
 			return Load(p)
